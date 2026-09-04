@@ -98,15 +98,28 @@ The model is warmed up at startup with a throwaway generation, because the first
 
 ---
 
-## Adding a language
+## Languages
 
-Chatterbox supports 23. Add one line to `LANGUAGES` in `pipeline.py`:
+All 22 target languages the voice model supports are enabled:
+
+> Arabic · Chinese · Danish · Dutch · Finnish · French · German · Greek · Hebrew · Hindi · Italian · Japanese · Korean · Malay · Norwegian · Polish · Portuguese · Russian · Spanish · Swahili · Swedish · Turkish
+
+**The voice model is the constraint, not the translation.** Claude translates into far more languages than this; Chatterbox can only *speak* these 23 (the 22 above plus English, the source).
+
+Spot-checked end to end by translating, generating, then transcribing the audio back — Polish, Hindi, Arabic and Swedish all round-tripped accurately, so non-Latin scripts and right-to-left text are fine.
+
+To change the list, edit `LANGUAGES` in `pipeline.py` — one line each. The key is the code Chatterbox knows, the value is the name Claude translates into:
 
 ```python
 LANGUAGES = {
-    "ru": "Russian",
-    "pl": "Polish",     # ← the code Chatterbox uses, and the name Claude translates into
+    "pl": "Polish",
 }
+```
+
+To see every code the installed model accepts:
+
+```bash
+.venv/bin/python -c "from chatterbox.mtl_tts import SUPPORTED_LANGUAGES; print(SUPPORTED_LANGUAGES)"
 ```
 
 ---

@@ -43,15 +43,36 @@ load_dotenv()
 # a language other than English, since the ".en" models are English-only.
 WHISPER_MODEL = "small.en"
 
+# Every language the voice model can speak, minus English (the source).
+#
+# Two things have to agree for a language to work: the KEY must be a code
+# Chatterbox knows (import SUPPORTED_LANGUAGES from chatterbox.mtl_tts to
+# see them all), and the VALUE is the plain name Claude translates into.
+# Adding a language really is one line — the constraint is the voice model,
+# not the translation, since Claude handles far more languages than this.
 LANGUAGES = {
-    "ru": "Russian",
-    "es": "Spanish",
+    "ar": "Arabic",
+    "zh": "Chinese",
+    "da": "Danish",
+    "nl": "Dutch",
+    "fi": "Finnish",
     "fr": "French",
     "de": "German",
+    "el": "Greek",
+    "he": "Hebrew",
+    "hi": "Hindi",
     "it": "Italian",
     "ja": "Japanese",
     "ko": "Korean",
-    "zh": "Chinese",
+    "ms": "Malay",
+    "no": "Norwegian",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "es": "Spanish",
+    "sw": "Swahili",
+    "sv": "Swedish",
+    "tr": "Turkish",
 }
 
 TRANSLATION_SYSTEM = """You translate transcribed speech into {language}.
