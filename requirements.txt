@@ -1,0 +1,17 @@
+# Voice cloning + speech recognition
+chatterbox-tts==0.1.7
+faster-whisper==1.2.1
+
+# Translation
+anthropic==1.3.0
+
+# Web server
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+python-dotenv==1.2.3
+
+# Chatterbox's audio watermarker imports pkg_resources, which setuptools
+# removed in v81. Without this pin the model fails to load with a confusing
+# "'NoneType' object is not callable" error rather than a missing-module one.
+setuptools<81

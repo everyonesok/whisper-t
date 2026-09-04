@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    a { color: oklch(0.70 0.15 55); text-decoration: none; }
+    a:hover { color: oklch(0.80 0.15 55); }
+  </style>
+</helmet>
+
+<div style="width: 560px; height: 780px; background: oklch(0.17 0.008 75); color: oklch(0.94 0.012 85); display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid oklch(0.26 0.010 75);">
+    <div style="display: flex; align-items: center; gap: 7px;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: oklch(0.70 0.15 55);"></span>
+      <span style="font-size: 17px; font-weight: 700; letter-spacing: -0.02em;">echo</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid oklch(0.30 0.012 75); border-radius: 7px; background: oklch(0.21 0.009 75); opacity: 0.45;">
+      <span style="font-size: 13px; font-weight: 500;">Russian</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="oklch(0.68 0.014 85)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+    </div>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; gap: 26px; padding: 32px 34px;">
+
+    <div style="display: flex; flex-direction: column; gap: 17px;">
+      <div style="width: 52px; height: 52px; border-radius: 50%; background: oklch(0.22 0.020 25); border: 1px solid oklch(0.34 0.05 25); display: flex; align-items: center; justify-content: center;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="oklch(0.65 0.18 25)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="21" y2="21"></line><path d="M9 5a3 3 0 0 1 6 0v5m-6 0v1a3 3 0 0 0 4.5 2.6"></path><path d="M5 10v1a7 7 0 0 0 10.5 6.1M19 10v1a6.9 6.9 0 0 1-.6 2.8"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-size: 21px; font-weight: 500; letter-spacing: -0.01em;">Microphone blocked</div>
+        <div style="font-size: 13.5px; line-height: 1.6; color: oklch(0.68 0.014 85); text-wrap: pretty;">Your browser won't ask again on its own, so this has to be changed by hand. It takes about ten seconds.</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 1px; border: 1px solid oklch(0.28 0.012 75); border-radius: 10px; overflow: hidden; background: oklch(0.28 0.012 75);">
+
+      <div style="display: flex; gap: 13px; padding: 15px 17px; background: oklch(0.20 0.009 75);">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: oklch(0.70 0.15 55); flex-shrink: 0; padding-top: 1px;">1</span>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 13.5px; color: oklch(0.86 0.012 85);">Click the</span>
+          <span style="display: flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid oklch(0.34 0.014 75); border-radius: 5px; background: oklch(0.25 0.010 75);">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="oklch(0.80 0.014 85)" stroke-width="2" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"></line><line x1="4" y1="16" x2="20" y2="16"></line><circle cx="15" cy="8" r="2.4" fill="oklch(0.25 0.010 75)"></circle><circle cx="9" cy="16" r="2.4" fill="oklch(0.25 0.010 75)"></circle></svg>
+          </span>
+          <span style="font-size: 13.5px; color: oklch(0.86 0.012 85);">icon in your address bar</span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 13px; padding: 15px 17px; background: oklch(0.20 0.009 75);">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: oklch(0.70 0.15 55); flex-shrink: 0; padding-top: 1px;">2</span>
+        <span style="font-size: 13.5px; line-height: 1.5; color: oklch(0.86 0.012 85);">Switch <strong style="font-weight: 500;">Microphone</strong> on</span>
+      </div>
+
+      <div style="display: flex; gap: 13px; padding: 15px 17px; background: oklch(0.20 0.009 75);">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: oklch(0.70 0.15 55); flex-shrink: 0; padding-top: 1px;">3</span>
+        <span style="font-size: 13.5px; line-height: 1.5; color: oklch(0.86 0.012 85);">Reload this page</span>
+      </div>
+
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 9px; padding: 14px; border-radius: 9px; background: oklch(0.70 0.15 55); color: oklch(0.17 0.008 75);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.17 0.008 75)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"></path></svg>
+      <span style="font-size: 14.5px; font-weight: 500;">Reload and try again</span>
+    </div>
+
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 24px; border-top: 1px solid oklch(0.26 0.010 75); background: oklch(0.155 0.008 75); font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; color: oklch(0.58 0.012 85);">
+    <div style="display: flex; align-items: center; gap: 7px;">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: oklch(0.65 0.18 25);"></span>
+      <span>mic permission denied</span>
+    </div>
+    <span>NotAllowedError</span>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "x": 0,    "y": 0,    "w": 560, "h": 780, "title": "1 · Ready" },
+    { "file": "Recording.dc.html",  "x": 640,  "y": 0,    "w": 560, "h": 780, "title": "2 · Recording" },
+    { "file": "Processing.dc.html", "x": 1280, "y": 0,    "w": 560, "h": 780, "title": "3 · Processing" },
+    { "file": "Result.dc.html",     "x": 1920, "y": 0,    "w": 560, "h": 780, "title": "4 · Result" },
+    { "file": "Permission.dc.html", "x": 0,    "y": 1060, "w": 560, "h": 780, "title": "Asking for the mic" },
+    { "file": "Denied.dc.html",     "x": 640,  "y": 1060, "w": 560, "h": 780, "title": "Mic blocked" },
+    { "file": "Errors.dc.html",     "x": 1280, "y": 1060, "w": 560, "h": 780, "title": "Failure states" }
+  ],
+  "annotations": [
+    {
+      "id": "note-flow",
+      "x": 0,
+      "y": -230,
+      "w": 560,
+      "text": "THE HAPPY PATH — read left to right.\n\nThe layout here is trivial: a button, a dropdown, some text. The actual design problem is that stage 3 takes 8–13 seconds on the Mac, so most of this flow is spent waiting. That's what these four screens are really about."
+    },
+    {
+      "id": "note-length",
+      "x": 640,
+      "y": -230,
+      "w": 560,
+      "text": "THE LENGTH METER is the main lever.\n\nGeneration time scales with how much you say — a sentence takes ~10s, a paragraph took 80s in testing. Rather than hiding that, the meter makes length feel consequential while you're still talking, and predicts the wait before you commit to it."
+    },
+    {
+      "id": "note-stages",
+      "x": 1280,
+      "y": -230,
+      "w": 560,
+      "text": "NAME THE SLOW STAGE BEFORE IT RUNS.\n\nThree sub-stages with honest labels turn dead air into visible progress. Saying \"this is the slow part\" up front costs nothing and converts confusion into patience — an unexplained 10-second freeze reads as broken."
+    },
+    {
+      "id": "note-transcript",
+      "x": 1920,
+      "y": -230,
+      "w": 560,
+      "text": "SHOW THE WORK, NOT JUST THE ANSWER.\n\nWhen the Russian sounds wrong, the cause is either mishearing or mistranslation. Showing the English transcript alongside tells you which — and the timing bar shows where the time actually went. Useful for a learning prototype, and honest in general."
+    },
+    {
+      "id": "note-save",
+      "x": 1920,
+      "y": 850,
+      "w": 560,
+      "text": "SAVING PICKS A FOLDER, NOT THE DOWNLOADS BIN.\n\nA plain browser download dumps the file wherever Chrome is configured to put it. Instead this opens the real macOS save dialog, so you choose where it lands and what it's called.\n\nThe default filename comes from what you actually said — meet-on-tuesday-ru.wav rather than output.wav — so a folder of these is still readable in a month. Showing it before you click means no surprises about what you're getting."
+    },
+    {
+      "id": "note-permission",
+      "x": 0,
+      "y": 850,
+      "w": 560,
+      "text": "PERMISSION IS A ONE-SHOT DOOR.\n\nIf someone clicks Block, the browser never asks again — so \"Allow microphone access\" as an error message is a dead end. The recovery screen spells out the exact clicks instead. No fake browser chrome is drawn: the real prompt renders over the page."
+    },
+    {
+      "id": "note-errors",
+      "x": 1280,
+      "y": 850,
+      "w": 560,
+      "text": "ONE ERROR PER STAGE, EACH KEEPING THE WORK.\n\nA single generic \"something went wrong\" would throw away a good transcript because the last step failed. Each of these preserves what already succeeded and retries only the part that broke."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

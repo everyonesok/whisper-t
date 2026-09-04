@@ -1,0 +1,28 @@
+# ── Secrets ───────────────────────────────────────────────
+.env
+
+# ── Personal voice recordings ─────────────────────────────
+# Your reference voice and everything generated from it stays on your
+# machine. Anyone cloning this repo records their own.
+*.wav
+*.mp3
+*.m4a
+*.aiff
+*.caf
+*.webm
+
+# ── Python ────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+
+# ── Generated / local ─────────────────────────────────────
+*.log
+.DS_Store
+
+# The design canvas is assembled from the .dc.html sources plus
+# canvas.json; the built file is 2.5MB and shouldn't be tracked.
+echo-voice-translator.html
+
+# Machine-specific launch paths
+.claude/

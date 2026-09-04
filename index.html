@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>echo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg:      oklch(0.17 0.008 75);
+    --panel:   oklch(0.20 0.009 75);
+    --raised:  oklch(0.22 0.010 75);
+    --line:    oklch(0.26 0.010 75);
+    --line2:   oklch(0.30 0.012 75);
+    --text:    oklch(0.94 0.012 85);
+    --muted:   oklch(0.66 0.014 85);
+    --faint:   oklch(0.56 0.012 85);
+    --accent:  oklch(0.70 0.15 55);
+    --green:   oklch(0.70 0.15 155);
+    --red:     oklch(0.65 0.18 25);
+    --amber:   oklch(0.72 0.13 90);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .app {
+    width: 560px; height: 780px; max-height: calc(100vh - 40px);
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 14px; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 30px 70px -30px oklch(0.05 0.004 75);
+  }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+  .brand { display: flex; align-items: center; gap: 7px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .brand span { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+  select {
+    font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
+    background: var(--raised); border: 1px solid var(--line2);
+    border-radius: 7px; padding: 7px 11px; cursor: pointer;
+  }
+  select:disabled { opacity: 0.45; cursor: default; }
+
+  main { flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .screen {
+    flex-grow: 1; display: flex; flex-direction: column;
+    padding: 30px; overflow-y: auto;
+  }
+  .screen.center { align-items: center; justify-content: center; }
+
+  footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 24px; border-top: 1px solid var(--line);
+    background: oklch(0.155 0.008 75); flex-shrink: 0;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11.5px; color: var(--faint);
+  }
+  .status { display: flex; align-items: center; gap: 7px; }
+
+  /* ---- mic button ---- */
+  .mic {
+    width: 168px; height: 168px; border-radius: 50%;
+    background: var(--raised); border: 1px solid oklch(0.32 0.014 75);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+    box-shadow: inset 0 1px 0 oklch(0.38 0.014 75), 0 18px 40px -18px oklch(0.10 0.006 75);
+    transition: transform 0.12s ease, border-color 0.12s ease;
+    touch-action: none;
+  }
+  .mic:hover { border-color: var(--accent); }
+  .mic:active { transform: scale(0.96); }
+
+  .hint {
+    display: flex; gap: 12px; padding: 14px 16px; max-width: 380px;
+    border: 1px solid oklch(0.28 0.012 75); border-radius: 9px;
+    background: oklch(0.195 0.009 75);
+  }
+
+  /* ---- recording ---- */
+  .bars { display: flex; align-items: center; gap: 5px; height: 76px; }
+  .bars i {
+    width: 4px; height: 8px; border-radius: 2px; background: var(--accent);
+    transition: height 0.07s linear;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
+  .rec-dot { animation: pulse 1.4s ease-in-out infinite; }
+  .timer { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 34px; }
+  .meter { display: flex; gap: 3px; height: 7px; }
+  .meter div { border-radius: 2px; background: var(--line2); transition: background 0.2s; }
+
+  /* ---- stages ---- */
+  .stage { display: flex; gap: 15px; align-items: flex-start; }
+  .stage .icon { width: 19px; flex-shrink: 0; padding-top: 2px; }
+  .rail { width: 1.5px; height: 30px; background: var(--line2); margin: 3px auto 0; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  .spin { animation: spin 1.1s linear infinite; transform-origin: 50% 50%; }
+  @keyframes sweep { 0% { transform: translateX(-100%) } 100% { transform: translateX(320%) } }
+  .sweep { animation: sweep 1.6s ease-in-out infinite; }
+
+  /* ---- buttons ---- */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 14px 16px; border-radius: 9px; cursor: pointer; border: none;
+    font-family: inherit; font-size: 14.5px; font-weight: 500;
+  }
+  .btn-primary { background: var(--accent); color: var(--bg); flex-grow: 1; }
+  .btn-save {
+    background: oklch(0.24 0.022 55); border: 1px solid oklch(0.42 0.05 55);
+    color: oklch(0.86 0.05 55); font-size: 14px;
+  }
+  .btn-ghost {
+    background: var(--raised); border: 1px solid oklch(0.32 0.014 75); color: var(--text);
+  }
+  .btn:active { transform: scale(0.98); }
+
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .label { font-family: 'IBM Plex Mono', ui-monospace, monospace;
+           font-size: 10.5px; letter-spacing: 0.08em; color: var(--faint); }
+  .linkish { font-size: 12px; color: var(--accent); cursor: pointer;
+             background: none; border: none; font-family: inherit;
+             border-bottom: 1px solid var(--accent); padding: 0 0 1px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="brand"><span class="dot"></span><span>echo</span></div>
+    <select id="lang"></select>
+  </header>
+
+  <main>
+
+    <!-- ============ IDLE ============ -->
+    <section class="screen center" id="s-idle" style="gap:30px">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:22px">
+        <div class="mic" id="micBtn">
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/>
+          </svg>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+          <div style="font-size:21px;font-weight:500">Hold to speak</div>
+          <div style="font-size:13px;color:var(--muted)">Release when you're done</div>
+        </div>
+      </div>
+      <div class="hint">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0;margin-top:1px">
+          <circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="font-size:13.5px;font-weight:500">One sentence at a time</div>
+          <div style="font-size:12.5px;line-height:1.5;color:var(--muted)">A short sentence takes about 15 seconds. A long paragraph can take over a minute.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RECORDING ============ -->
+    <section class="screen center" id="s-rec" hidden style="gap:32px">
+      <div style="display:flex;align-items:center;gap:9px">
+        <span class="rec-dot" style="width:9px;height:9px;border-radius:50%;background:var(--red)"></span>
+        <span class="mono" style="font-size:14px;font-weight:500;color:var(--red);letter-spacing:0.04em">RECORDING</span>
+      </div>
+      <div class="bars" id="bars"></div>
+      <div class="timer" id="timer">0:00</div>
+      <div style="width:100%;max-width:392px;display:flex;flex-direction:column;gap:11px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <span id="lenLabel" style="font-size:13px;font-weight:500;color:var(--green)">Good length</span>
+          <span id="waitEst" class="mono" style="font-size:12px;color:var(--muted)">~15s wait</span>
+        </div>
+        <div class="meter">
+          <div id="m1" style="flex-grow:4"></div><div id="m2" style="flex-grow:3"></div><div id="m3" style="flex-grow:3"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between" class="mono">
+          <span style="font-size:10.5px;color:var(--faint)">SHORT</span>
+          <span style="font-size:10.5px;color:var(--faint)">LONG</span>
+          <span style="font-size:10.5px;color:var(--faint)">VERY LONG</span>
+        </div>
+      </div>
+      <div style="font-size:14px;color:var(--muted)">Release to translate</div>
+    </section>
+
+    <!-- ============ PROCESSING ============ -->
+    <section class="screen" id="s-proc" hidden style="justify-content:center;gap:30px;padding:30px 40px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:20px;font-weight:500">Working on it</div>
+        <div style="font-size:13.5px;color:var(--muted)" id="procSub">Listening back to what you said</div>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <div class="stage" id="st-1">
+          <div class="icon"><span id="ic-1"></span><div class="rail"></div></div>
+          <div style="display:flex;flex-grow:1;justify-content:space-between;align-items:baseline;padding-bottom:22px">
+            <span style="font-size:15px">Understanding what you said</span>
+            <span class="mono" style="font-size:12px;color:var(--faint)" id="t-1"></span>
+          </div>
+        </div>
+        <div class="stage" id="st-2">
+          <div class="icon"><span id="ic-2"></span><div class="rail"></div></div>
+          <div style="display:flex;flex-grow:1;justify-content:space-between;align-items:baseline;padding-bottom:22px">
+            <span style="font-size:15px" id="lbl-2">Translating</span>
+            <span class="mono" style="font-size:12px;color:var(--faint)" id="t-2"></span>
+          </div>
+        </div>
+        <div class="stage" id="st-3">
+          <div class="icon"><span id="ic-3"></span></div>
+          <div style="display:flex;flex-direction:column;flex-grow:1;gap:4px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:15px">Cloning your voice</span>
+              <span class="mono" style="font-size:12px;color:var(--faint)" id="t-3">~10s</span>
+            </div>
+            <span style="font-size:12.5px;color:var(--faint)">This is the slow part — it runs on your Mac</span>
+          </div>
+        </div>
+      </div>
+      <div id="procHeard" hidden style="padding:13px 15px;border-left:2px solid var(--line2);background:oklch(0.195 0.009 75)">
+        <div style="font-size:12.5px;line-height:1.55;color:var(--muted)" id="procHeardText"></div>
+      </div>
+    </section>
+
+    <!-- ============ RESULT ============ -->
+    <section class="screen" id="s-result" hidden style="gap:18px;padding:26px 24px">
+      <div style="display:flex;align-items:center;gap:16px;padding:17px 19px;border:1px solid var(--line2);border-radius:11px;background:var(--raised)">
+        <button id="playBtn" style="width:46px;height:46px;border-radius:50%;background:var(--accent);border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">
+          <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="var(--bg)" style="margin-left:3px"><polygon points="6 4 20 12 6 20"/></svg>
+        </button>
+        <div class="bars" id="resultBars" style="flex-grow:1;height:40px;gap:3px"></div>
+        <span class="mono" id="dur" style="font-size:12px;color:var(--muted);flex-shrink:0">0:00</span>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="label">HEARD</span>
+          <button class="linkish" id="redoBtn">Not what you said?</button>
+        </div>
+        <div style="font-size:14.5px;line-height:1.55;color:var(--muted)" id="heard"></div>
+      </div>
+
+      <div style="height:1px;background:var(--line)"></div>
+
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <span class="label" id="targetLabel">RUSSIAN</span>
+        <div style="font-size:20px;line-height:1.45;font-weight:500" id="translated"></div>
+      </div>
+
+      <div style="flex-grow:1"></div>
+
+      <div style="display:flex;gap:3px" class="mono" id="timings"></div>
+
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid var(--line2);border-radius:8px;background:oklch(0.195 0.009 75)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span class="mono" style="font-size:11px;color:var(--faint)">saves as</span>
+        <span class="mono" style="font-size:11px;color:var(--text)" id="filename"></span>
+      </div>
+
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" id="againBtn">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+          Say something else
+        </button>
+        <button class="btn btn-save" id="saveBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.78 0.13 55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Save
+        </button>
+      </div>
+    </section>
+
+    <!-- ============ ERROR / DENIED ============ -->
+    <section class="screen" id="s-error" hidden style="justify-content:center;gap:24px;padding:32px 34px">
+      <div style="width:52px;height:52px;border-radius:50%;background:oklch(0.22 0.020 25);border:1px solid oklch(0.34 0.05 25);display:flex;align-items:center;justify-content:center">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="7.5" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12.01" y2="16.5"/></svg>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:21px;font-weight:500" id="errTitle">Something went wrong</div>
+        <div style="font-size:13.5px;line-height:1.6;color:var(--muted)" id="errBody"></div>
+      </div>
+      <div id="errSteps" hidden style="display:flex;flex-direction:column;gap:1px;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--line2)">
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">1</span>Click the icon at the left of your address bar</div>
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">2</span>Switch <strong style="font-weight:500">Microphone</strong> on</div>
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">3</span>Reload this page</div>
+      </div>
+      <div id="errKept" hidden style="padding:12px 14px;border-radius:8px;background:oklch(0.155 0.008 75);border:1px solid var(--line);font-size:13.5px" ></div>
+      <button class="btn btn-primary" id="errBtn" style="flex-grow:0">Try again</button>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="status"><span class="dot" id="statusDot" style="background:var(--green)"></span><span id="statusText">ready</span></div>
+    <span class="mono" id="statusRight">en → ru</span>
+  </footer>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
+let stream, recorder, chunks = [], startedAt = 0, tick, audioCtx, analyser, rafId;
+let resultBlob = null, resultAudio = null, resultName = "translation.wav";
+
+const $ = id => document.getElementById(id);
+const screens = ["s-idle", "s-rec", "s-proc", "s-result", "s-error"];
+
+function show(id) {
+  screens.forEach(s => $(s).hidden = (s !== id));
+}
+function status(text, color = "var(--green)") {
+  $("statusText").textContent = text;
+  $("statusDot").style.background = color;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Languages
+// ─────────────────────────────────────────────────────────────
+let LANGS = {};
+fetch("/api/languages").then(r => r.json()).then(langs => {
+  LANGS = langs;
+  $("lang").innerHTML = Object.entries(langs)
+    .map(([code, name]) => `<option value="${code}">${name}</option>`).join("");
+  $("lang").value = "ru";
+  updateTarget();
+});
+$("lang").addEventListener("change", updateTarget);
+function updateTarget() {
+  const code = $("lang").value;
+  $("statusRight").textContent = `en → ${code}`;
+  $("targetLabel").textContent = (LANGS[code] || "").toUpperCase();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Level meter bars
+// ─────────────────────────────────────────────────────────────
+$("bars").innerHTML = Array.from({length: 10}, () => "<i></i>").join("");
+const barEls = [...$("bars").children];
+
+function drawLevels() {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  // Map the low-frequency half (where speech lives) across the 10 bars.
+  const usable = Math.floor(data.length / 2);
+  barEls.forEach((bar, i) => {
+    const slice = data.slice(i * usable / 10, (i + 1) * usable / 10);
+    const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+    bar.style.height = Math.max(6, Math.min(76, avg * 0.6)) + "px";
+  });
+  rafId = requestAnimationFrame(drawLevels);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Recording
+// ─────────────────────────────────────────────────────────────
+// Longest recording we'll allow. A safety net: if a release is ever missed
+// again you stop after this rather than recording forever. It also matches
+// the design's push toward short sentences — 30s of speech would take about
+// two and a half minutes to generate.
+const MAX_SECONDS = 30;
+
+// Tracks whether the button is currently held. Needed because getUserMedia
+// is asynchronous: on first use the permission prompt can outlast the press.
+let holding = false;
+
+async function startRecording() {
+  if (recorder && recorder.state === "recording") return;
+  holding = true;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    holding = false;
+    // The browser will not ask a second time once it has been refused,
+    // so this needs manual recovery instructions rather than a retry.
+    showError({
+      title: "Microphone blocked",
+      body: "Your browser won't ask again on its own, so this has to be changed by hand. It takes about ten seconds.",
+      steps: true,
+      button: "Reload and try again",
+      action: () => location.reload(),
+    });
+    return;
+  }
+
+  // If the button was released while the permission prompt was up, don't
+  // start at all — otherwise we'd begin recording with nothing left to stop it.
+  if (!holding) {
+    stream.getTracks().forEach(t => t.stop());
+    return;
+  }
+
+  audioCtx = new AudioContext();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 128;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+  drawLevels();
+
+  chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = onRecordingStopped;
+  recorder.start();
+
+  startedAt = Date.now();
+  show("s-rec");
+  status("capturing", "var(--red)");
+  tick = setInterval(updateMeter, 100);
+}
+
+function updateMeter() {
+  const secs = (Date.now() - startedAt) / 1000;
+  const m = Math.floor(secs / 60), s = Math.floor(secs % 60);
+  $("timer").textContent = `${m}:${String(s).padStart(2, "0")}`;
+
+  // Hard stop, so a missed release can never leave the mic running forever.
+  if (secs >= MAX_SECONDS) { stopRecording(); return; }
+
+  // Measured on this machine: generation runs roughly 2.5x the length of
+  // the speech, plus about 5s of fixed cost for the other two stages.
+  $("waitEst").textContent = `~${Math.round(5 + secs * 2.5)}s wait`;
+
+  const zones = [
+    { limit: 6,  label: "Good length",  color: "var(--green)", fill: 1 },
+    { limit: 12, label: "Getting long", color: "var(--amber)", fill: 2 },
+    { limit: 1e9, label: "Very long — this will take a while", color: "var(--red)", fill: 3 },
+  ];
+  const zone = zones.find(z => secs < z.limit);
+  $("lenLabel").textContent = zone.label;
+  $("lenLabel").style.color = zone.color;
+  ["m1", "m2", "m3"].forEach((id, i) => {
+    $(id).style.background = i < zone.fill ? zone.color : "var(--line2)";
+  });
+}
+
+function stopRecording() {
+  holding = false;
+  if (!recorder || recorder.state !== "recording") return;
+  clearInterval(tick);
+  cancelAnimationFrame(rafId);
+  recorder.stop();
+  stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+}
+
+// Hold-to-talk. Pointer events cover mouse and touch in one path.
+$("micBtn").addEventListener("pointerdown", e => { e.preventDefault(); startRecording(); });
+
+// Release is watched on the WINDOW, not the button. Pressing swaps to the
+// recording screen, which hides the idle screen the button lives in — so a
+// pointerup bound to the button never arrives, and the recording never stops.
+// Listening on the window means releasing anywhere works.
+window.addEventListener("pointerup", stopRecording);
+window.addEventListener("pointercancel", stopRecording);
+window.addEventListener("blur", stopRecording);   // released after tabbing away
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") stopRecording();
+});
+
+// ─────────────────────────────────────────────────────────────
+// The pipeline call — reads progress as it streams in
+// ─────────────────────────────────────────────────────────────
+const ICON_DONE    = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.35"/><polyline points="8 12.5 11 15.5 16.5 9"/></svg>`;
+const ICON_ACTIVE  = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg>`;
+const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="oklch(0.42 0.012 75)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/></svg>`;
+
+let heardText = "", translatedText = "", stageTimes = {};
+
+async function onRecordingStopped() {
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  if (blob.size < 1000) {
+    showError({ title: "We didn't hear anything",
+      body: "The recording came through empty. Hold the button while you speak, then release.",
+      button: "Try again", action: () => show("s-idle") });
+    return;
+  }
+
+  heardText = ""; translatedText = ""; stageTimes = {};
+  $("ic-1").innerHTML = ICON_ACTIVE;
+  $("ic-2").innerHTML = ICON_WAITING;
+  $("ic-3").innerHTML = ICON_WAITING;
+  $("t-1").textContent = ""; $("t-2").textContent = ""; $("t-3").textContent = "~10s";
+  $("procHeard").hidden = true;
+  $("procSub").textContent = "Listening back to what you said";
+  $("lbl-2").textContent = "Translating to " + (LANGS[$("lang").value] || "");
+  show("s-proc");
+  status("working", "var(--accent)");
+
+  const form = new FormData();
+  form.append("audio", blob, "recording.webm");
+  form.append("language", $("lang").value);
+
+  let res;
+  try {
+    res = await fetch("/api/translate", { method: "POST", body: form });
+  } catch {
+    showError({ title: "Lost the connection",
+      body: "The server isn't responding. Check the terminal window where you started it.",
+      button: "Try again", action: () => show("s-idle") });
+    return;
+  }
+
+  // The server sends one JSON object per line as each stage completes,
+  // so progress here is real rather than a guess on a timer.
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (line.trim()) handleEvent(JSON.parse(line));
+    }
+  }
+}
+
+function handleEvent(ev) {
+  if (ev.status === "error") return handleStageError(ev);
+
+  if (ev.stage === "transcribe" && ev.status === "done") {
+    heardText = ev.text;
+    stageTimes.heard = ev.seconds;
+    $("ic-1").innerHTML = ICON_DONE;
+    $("t-1").textContent = ev.seconds + "s";
+    $("ic-2").innerHTML = ICON_ACTIVE;
+    $("procHeardText").textContent = `"${ev.text}"`;
+    $("procHeard").hidden = false;
+    $("procSub").textContent = "Finding the natural way to say it";
+  }
+
+  if (ev.stage === "translate" && ev.status === "done") {
+    translatedText = ev.text;
+    stageTimes.translated = ev.seconds;
+    $("ic-2").innerHTML = ICON_DONE;
+    $("t-2").textContent = ev.seconds + "s";
+  }
+
+  if (ev.stage === "speak" && ev.status === "start") {
+    $("ic-3").innerHTML = ICON_ACTIVE;
+    $("procSub").textContent = "Almost there — this is the slow part";
+  }
+
+  if (ev.stage === "speak" && ev.status === "done") {
+    stageTimes.voice = ev.seconds;
+    const bytes = Uint8Array.from(atob(ev.audio), c => c.charCodeAt(0));
+    resultBlob = new Blob([bytes], { type: "audio/wav" });
+    showResult();
+  }
+}
+
+function handleStageError(ev) {
+  const kept = [];
+  if (ev.transcript) kept.push(`heard: "${ev.transcript}"`);
+  if (ev.translation) kept.push(ev.translation);
+
+  const titles = {
+    transcribe: "We didn't hear anything",
+    translate:  "Couldn't reach the translator",
+    speak:      "The voice didn't generate",
+  };
+  const bodies = {
+    transcribe: "The recording came through silent or unclear. Check the right microphone is selected, then try again.",
+    translate:  "Your words were captured fine — the translation step failed. Usually the network, occasionally an expired API key.",
+    speak:      "Everything up to the last step worked. The translation is below while you retry.",
+  };
+
+  showError({
+    title: titles[ev.stage] || "Something went wrong",
+    body: bodies[ev.stage] || ev.message,
+    kept: kept.join("  ·  "),
+    button: "Try again",
+    action: () => show("s-idle"),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Result
+// ─────────────────────────────────────────────────────────────
+// Speech starts with filler, so naming a file from the first few words gives
+// you "um-so-i-was.wav". Dropping fillers and common grammar words leaves the
+// words you'd actually search for later — "meet-tuesday-instead.wav".
+const FILLER = new Set(("um uh er ah mm hmm oh yeah okay so well like just really actually " +
+  "basically i you he she it we they me him her us them my your his its our their " +
+  "the a an and or but if then that this these those there here what when where how " +
+  "is are was were be been being am do does did done have has had will would shall " +
+  "should can could may might must of to in on at for with from by about as into " +
+  "over after before maybe perhaps some any not no yes think thinking know").split(" "));
+
+function slugify(text) {
+  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().split(/\s+/);
+  const meaty = words.filter(w => w.length > 2 && !FILLER.has(w));
+  // If a sentence is all filler ("so I was just thinking"), fall back to the
+  // raw words rather than producing an empty name.
+  const chosen = (meaty.length ? meaty : words).slice(0, 4);
+  return chosen.join("-").slice(0, 60) || "translation";
+}
+
+function showResult() {
+  $("heard").textContent = heardText;
+  $("translated").textContent = translatedText;
+  resultName = `${slugify(heardText)}-${$("lang").value}.wav`;
+  $("filename").textContent = resultName;
+
+  if (resultAudio) URL.revokeObjectURL(resultAudio.src);
+  resultAudio = new Audio(URL.createObjectURL(resultBlob));
+  resultAudio.addEventListener("loadedmetadata", () => {
+    const d = resultAudio.duration;
+    $("dur").textContent = `0:${String(Math.round(d)).padStart(2, "0")}`;
+  });
+  resultAudio.addEventListener("timeupdate", paintProgress);
+  resultAudio.addEventListener("ended", () => { setPlayIcon(false); paintProgress(); });
+
+  $("resultBars").innerHTML = Array.from({ length: 28 },
+    () => `<i style="height:${8 + Math.random() * 26}px"></i>`).join("");
+
+  const total = (stageTimes.heard + stageTimes.translated + stageTimes.voice).toFixed(1);
+  $("timings").innerHTML = [
+    ["heard", stageTimes.heard, "var(--green)"],
+    ["translated", stageTimes.translated, "oklch(0.70 0.15 200)"],
+    ["voice", stageTimes.voice, "var(--accent)"],
+  ].map(([label, secs, color]) => `
+    <div style="flex-grow:${Math.max(secs * 10, 6)};display:flex;flex-direction:column;gap:5px">
+      <div style="height:3px;background:${color};border-radius:2px"></div>
+      <span style="font-size:10.5px;color:var(--faint)">${label} ${secs}s</span>
+    </div>`).join("");
+
+  show("s-result");
+  status(`done in ${total}s`, "var(--green)");
+  paintProgress();
+}
+
+function paintProgress() {
+  const bars = [...$("resultBars").children];
+  const frac = resultAudio && resultAudio.duration
+    ? resultAudio.currentTime / resultAudio.duration : 0;
+  bars.forEach((b, i) => {
+    b.style.background = (i / bars.length) < frac ? "var(--accent)" : "oklch(0.34 0.012 75)";
+  });
+}
+
+function setPlayIcon(playing) {
+  $("playIcon").innerHTML = playing
+    ? `<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>`
+    : `<polygon points="6 4 20 12 6 20"/>`;
+  $("playIcon").style.marginLeft = playing ? "0" : "3px";
+}
+
+$("playBtn").addEventListener("click", () => {
+  if (!resultAudio) return;
+  if (resultAudio.paused) { resultAudio.play(); setPlayIcon(true); }
+  else { resultAudio.pause(); setPlayIcon(false); }
+});
+
+$("againBtn").addEventListener("click", () => { show("s-idle"); status("ready"); });
+$("redoBtn").addEventListener("click", () => { show("s-idle"); status("ready"); });
+
+// ─────────────────────────────────────────────────────────────
+// Saving — a real folder picker, not the downloads bin
+// ─────────────────────────────────────────────────────────────
+$("saveBtn").addEventListener("click", async () => {
+  if (!resultBlob) return;
+
+  // showSaveFilePicker opens the actual macOS save dialog, so you choose
+  // the folder and filename. Chrome and Edge only — everywhere else falls
+  // back to an ordinary download.
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: resultName,
+        types: [{ description: "WAV audio", accept: { "audio/wav": [".wav"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(resultBlob);
+      await writable.close();
+      status("saved", "var(--green)");
+    } catch (err) {
+      // Cancelling the dialog throws AbortError — that isn't a failure.
+      if (err.name !== "AbortError") status("save failed", "var(--red)");
+    }
+  } else {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(resultBlob);
+    a.download = resultName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    status("downloaded", "var(--green)");
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Errors
+// ─────────────────────────────────────────────────────────────
+function showError({ title, body, steps = false, kept = "", button, action }) {
+  $("errTitle").textContent = title;
+  $("errBody").textContent = body;
+  $("errSteps").hidden = !steps;
+  $("errKept").hidden = !kept;
+  $("errKept").textContent = kept;
+  $("errBtn").textContent = button;
+  $("errBtn").onclick = action;
+  show("s-error");
+  status(title.toLowerCase(), "var(--red)");
+}
+</script>
+</body>
+</html>

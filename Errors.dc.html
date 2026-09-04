@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    a { color: oklch(0.70 0.15 55); text-decoration: none; }
+    a:hover { color: oklch(0.80 0.15 55); }
+  </style>
+</helmet>
+
+<div style="width: 560px; height: 780px; background: oklch(0.17 0.008 75); color: oklch(0.94 0.012 85); display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid oklch(0.26 0.010 75);">
+    <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; color: oklch(0.56 0.012 85);">FAILURE STATES</span>
+    <span style="font-size: 12px; color: oklch(0.60 0.014 85);">One per stage &#8212; each recovers differently</span>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 15px; padding: 22px 24px; justify-content: center;">
+
+    <div style="display: flex; flex-direction: column; gap: 13px; padding: 19px; border: 1px solid oklch(0.30 0.012 75); border-radius: 11px; background: oklch(0.20 0.009 75);">
+      <div style="display: flex; gap: 13px;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="oklch(0.72 0.13 90)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 3 2.5 20h19L12 3z"></path><line x1="12" y1="10" x2="12" y2="14"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="font-size: 15px; font-weight: 500;">We didn't hear anything</div>
+          <div style="font-size: 12.5px; line-height: 1.55; color: oklch(0.66 0.014 85); text-wrap: pretty;">The recording came through silent. Check the right microphone is selected, then hold the button while you speak.</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 9px; padding-left: 32px;">
+        <div style="padding: 9px 15px; border-radius: 7px; background: oklch(0.70 0.15 55); color: oklch(0.17 0.008 75); font-size: 13px; font-weight: 500;">Try again</div>
+        <div style="padding: 9px 15px; border: 1px solid oklch(0.32 0.014 75); border-radius: 7px; font-size: 13px; color: oklch(0.80 0.014 85);">Choose microphone</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 13px; padding: 19px; border: 1px solid oklch(0.30 0.012 75); border-radius: 11px; background: oklch(0.20 0.009 75);">
+      <div style="display: flex; gap: 13px;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="oklch(0.65 0.18 25)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="9.5"></circle><line x1="12" y1="7.5" x2="12" y2="13"></line><line x1="12" y1="16.5" x2="12.01" y2="16.5"></line></svg>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="font-size: 15px; font-weight: 500;">Couldn't reach the translator</div>
+          <div style="font-size: 12.5px; line-height: 1.55; color: oklch(0.66 0.014 85); text-wrap: pretty;">Your words were captured fine &#8212; the translation step failed. Usually the network, occasionally an expired API key.</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding-left: 32px;">
+        <div style="padding: 11px 13px; border-radius: 7px; background: oklch(0.155 0.008 75); border: 1px solid oklch(0.26 0.010 75); font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: oklch(0.60 0.014 85);">heard: &#8220;let's meet on Tuesday&#8221;</div>
+        <div style="display: flex; gap: 9px;">
+          <div style="padding: 9px 15px; border-radius: 7px; background: oklch(0.70 0.15 55); color: oklch(0.17 0.008 75); font-size: 13px; font-weight: 500;">Retry translation</div>
+          <div style="padding: 9px 15px; border: 1px solid oklch(0.32 0.014 75); border-radius: 7px; font-size: 13px; color: oklch(0.80 0.014 85);">Start over</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 13px; padding: 19px; border: 1px solid oklch(0.30 0.012 75); border-radius: 11px; background: oklch(0.20 0.009 75);">
+      <div style="display: flex; gap: 13px;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="oklch(0.65 0.18 25)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><circle cx="12" cy="12" r="9.5"></circle><line x1="12" y1="7.5" x2="12" y2="13"></line><line x1="12" y1="16.5" x2="12.01" y2="16.5"></line></svg>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="font-size: 15px; font-weight: 500;">The voice didn't generate</div>
+          <div style="font-size: 12.5px; line-height: 1.55; color: oklch(0.66 0.014 85); text-wrap: pretty;">Everything up to the last step worked. You can still read the translation below while you retry.</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding-left: 32px;">
+        <div style="padding: 11px 13px; border-radius: 7px; background: oklch(0.155 0.008 75); border: 1px solid oklch(0.26 0.010 75); font-size: 13.5px; color: oklch(0.88 0.012 85);">&#1044;&#1072;&#1074;&#1072;&#1081;&#1090;&#1077; &#1074;&#1089;&#1090;&#1088;&#1077;&#1090;&#1080;&#1084;&#1089;&#1103; &#1074;&#1086; &#1074;&#1090;&#1086;&#1088;&#1085;&#1080;&#1082;.</div>
+        <div style="display: flex; gap: 9px;">
+          <div style="padding: 9px 15px; border-radius: 7px; background: oklch(0.70 0.15 55); color: oklch(0.17 0.008 75); font-size: 13px; font-weight: 500;">Generate again</div>
+          <div style="padding: 9px 15px; border: 1px solid oklch(0.32 0.014 75); border-radius: 7px; font-size: 13px; color: oklch(0.80 0.014 85);">Copy text</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 13px 24px; border-top: 1px solid oklch(0.26 0.010 75); background: oklch(0.155 0.008 75); font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11.5px; color: oklch(0.58 0.012 85);">
+    <span>never lose work already done</span>
+    <span>3 stages &#183; 3 recoveries</span>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
