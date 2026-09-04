@@ -252,6 +252,53 @@ class VoiceTranslator:
         kept = [s.text.strip() for s in segments if s.no_speech_prob < 0.8]
         return " ".join(kept).strip(), info.language
 
+    def transcribe_chunks(self, audio_path):
+        """
+        Stage 1, streaming variant: yields complete sentences as they emerge.
+
+        Same transcription as transcribe(), but instead of returning one
+        blob of text at the end, it hands back each sentence the moment
+        it's complete — so translation and voice generation for sentence
+        one can start while sentence two is still being transcribed.
+
+        This is a generator, so nothing runs until you iterate it:
+
+            for sentence in t.transcribe_chunks("recording.wav"):
+                ...          # runs once per sentence, as each is ready
+
+        NOTE: this does NOT make transcription itself progressive.
+        faster-whisper returns a generator, but the first next() does all
+        the work — measured on a 17s file, all six segments became
+        available at the same instant (2.35s), with or without VAD.
+        Whisper processes audio in 30-second windows, so anything shorter
+        is a single atomic forward pass with nothing to stream.
+
+        The win is downstream: getting sentences as separate units lets
+        translation and voice generation for sentence one start while
+        two and three are still queued, instead of generating one long
+        clip. For genuinely live streaming, the caller feeds successive
+        audio slices in as they're recorded and SentenceBuffer stitches
+        sentences across those calls.
+        """
+        segments, info = self.whisper.transcribe(
+            audio_path, beam_size=5, vad_filter=True
+        )
+
+        buffer = SentenceBuffer()
+        for segment in segments:
+            # Same no-speech guard as transcribe() — drop anything the
+            # model itself flags as probably not speech.
+            if segment.no_speech_prob >= 0.8:
+                continue
+            for sentence in buffer.add(segment.text):
+                yield sentence
+
+        # Speech has ended. Whatever is left is a real (if unterminated)
+        # thought — emit it rather than silently dropping the last words.
+        leftover = buffer.flush()
+        if leftover:
+            yield leftover
+
     def translate(self, text, lang_code):
         """Stage 2: text -> translated text, with speech disfluencies cleaned up."""
         language = LANGUAGES[lang_code]
