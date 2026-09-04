@@ -150,10 +150,20 @@ Both were found during development and are fixed here, but they're the kind that
 
 ---
 
+## Responsible use
+
+**Only clone your own voice, or one you have explicit permission to use.**
+
+Two things are worth knowing if you build on this:
+
+**Everything generated here is watermarked.** Chatterbox applies Resemble AI's [Perth](https://github.com/resemble-ai/perth) imperceptible watermark to every clip before returning it. Audio produced by this tool can be identified as synthetic. Don't remove it.
+
+**Your reference recording is personal data.** It stays on your machine — `.gitignore` excludes every audio format for exactly this reason — and it never leaves it, since the voice cloning runs locally. Only the translated *text* is sent anywhere.
+
+---
+
 ## Licence & credits
 
 Prototype code — do what you like with it.
 
 Built on [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT, Resemble AI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), and the [Anthropic API](https://docs.anthropic.com).
-
-**Only clone your own voice, or a voice you have explicit permission to use.**
