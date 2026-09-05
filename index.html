@@ -127,6 +127,25 @@
   .linkish { font-size: 12px; color: var(--accent); cursor: pointer;
              background: none; border: none; font-family: inherit;
              border-bottom: 1px solid var(--accent); padding: 0 0 1px; }
+
+  /* ---- sentence rows (streaming results) ---- */
+  .srow {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 13px; border-radius: 9px;
+    border: 1px solid var(--line); background: oklch(0.195 0.009 75);
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .srow.playing { border-color: var(--accent); background: oklch(0.225 0.018 55); }
+  .srow.pending { opacity: 0.5; }
+  .srow .sicon {
+    width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--raised); border: 1px solid var(--line2);
+    cursor: pointer;
+  }
+  .srow.pending .sicon { cursor: default; }
+  .srow .ssrc { font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .srow .stxt { font-size: 15px; line-height: 1.45; margin-top: 3px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -227,31 +246,16 @@
     </section>
 
     <!-- ============ RESULT ============ -->
-    <section class="screen" id="s-result" hidden style="gap:18px;padding:26px 24px">
-      <div style="display:flex;align-items:center;gap:16px;padding:17px 19px;border:1px solid var(--line2);border-radius:11px;background:var(--raised)">
-        <button id="playBtn" style="width:46px;height:46px;border-radius:50%;background:var(--accent);border:none;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer">
-          <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="var(--bg)" style="margin-left:3px"><polygon points="6 4 20 12 6 20"/></svg>
-        </button>
-        <div class="bars" id="resultBars" style="flex-grow:1;height:40px;gap:3px"></div>
-        <span class="mono" id="dur" style="font-size:12px;color:var(--muted);flex-shrink:0">0:00</span>
+    <!-- Sentences arrive one at a time and start playing while later ones
+         are still generating, so this screen is live rather than final. -->
+    <section class="screen" id="s-result" hidden style="gap:14px;padding:22px 24px">
+
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span class="label" id="resultCount">1 SENTENCE</span>
+        <button class="linkish" id="redoBtn">Not what you said?</button>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span class="label">HEARD</span>
-          <button class="linkish" id="redoBtn">Not what you said?</button>
-        </div>
-        <div style="font-size:14.5px;line-height:1.55;color:var(--muted)" id="heard"></div>
-      </div>
-
-      <div style="height:1px;background:var(--line)"></div>
-
-      <div style="display:flex;flex-direction:column;gap:9px">
-        <span class="label" id="targetLabel">RUSSIAN</span>
-        <div style="font-size:20px;line-height:1.45;font-weight:500" id="translated"></div>
-      </div>
-
-      <div style="flex-grow:1"></div>
+      <div id="sentenceList" style="display:flex;flex-direction:column;gap:9px;overflow-y:auto;flex-grow:1"></div>
 
       <div style="display:flex;gap:3px" class="mono" id="timings"></div>
 
@@ -267,6 +271,9 @@
         <button class="btn btn-primary" id="againBtn">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
           Say something else
+        </button>
+        <button class="btn btn-save" id="replayAllBtn" title="Play all again">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.78 0.13 55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg>
         </button>
         <button class="btn btn-save" id="saveBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.78 0.13 55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -306,7 +313,6 @@
 // State
 // ─────────────────────────────────────────────────────────────
 let stream, recorder, chunks = [], startedAt = 0, tick, audioCtx, analyser, rafId;
-let resultBlob = null, resultAudio = null, resultName = "translation.wav";
 
 const $ = id => document.getElementById(id);
 const screens = ["s-idle", "s-rec", "s-proc", "s-result", "s-error"];
@@ -471,6 +477,14 @@ const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none
 
 let heardText = "", translatedText = "", stageTimes = {};
 
+// Sentences arrive one at a time from the server. Each entry is
+// { index, source, text, blob, audio } and lands in its own slot, so a
+// slow sentence never blocks a later one from being stored.
+let sentences = [];
+let playCursor = 1;        // 1-based index of the sentence we want to play next
+let isPlaying = false;
+let expectedChunks = 0;
+
 async function onRecordingStopped() {
   const blob = new Blob(chunks, { type: "audio/webm" });
   if (blob.size < 1000) {
@@ -481,6 +495,10 @@ async function onRecordingStopped() {
   }
 
   heardText = ""; translatedText = ""; stageTimes = {};
+  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0;
+  $("sentenceList").innerHTML = "";
+  $("timings").innerHTML = "";
+
   $("ic-1").innerHTML = ICON_ACTIVE;
   $("ic-2").innerHTML = ICON_WAITING;
   $("ic-3").innerHTML = ICON_WAITING;
@@ -505,8 +523,6 @@ async function onRecordingStopped() {
     return;
   }
 
-  // The server sends one JSON object per line as each stage completes,
-  // so progress here is real rather than a guess on a timer.
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -524,17 +540,20 @@ async function onRecordingStopped() {
 }
 
 function handleEvent(ev) {
-  if (ev.status === "error") return handleStageError(ev);
+  if (ev.status === "error" && ev.stage !== "chunk") return handleStageError(ev);
 
   if (ev.stage === "transcribe" && ev.status === "done") {
     heardText = ev.text;
     stageTimes.heard = ev.seconds;
+    expectedChunks = ev.chunks;
     $("ic-1").innerHTML = ICON_DONE;
     $("t-1").textContent = ev.seconds + "s";
     $("ic-2").innerHTML = ICON_ACTIVE;
     $("procHeardText").textContent = `"${ev.text}"`;
     $("procHeard").hidden = false;
-    $("procSub").textContent = "Finding the natural way to say it";
+    $("procSub").textContent = ev.chunks > 1
+      ? `${ev.chunks} sentences — you'll hear the first one shortly`
+      : "Finding the natural way to say it";
   }
 
   if (ev.stage === "translate" && ev.status === "done") {
@@ -549,12 +568,140 @@ function handleEvent(ev) {
     $("procSub").textContent = "Almost there — this is the slow part";
   }
 
-  if (ev.stage === "speak" && ev.status === "done") {
-    stageTimes.voice = ev.seconds;
-    const bytes = Uint8Array.from(atob(ev.audio), c => c.charCodeAt(0));
-    resultBlob = new Blob([bytes], { type: "audio/wav" });
-    showResult();
+  // Each sentence lands here as it finishes generating.
+  if (ev.stage === "chunk") {
+    if (sentences.length === 0) openResultScreen();
+    addSentence(ev);
   }
+
+  if (ev.stage === "complete") {
+    stageTimes.voice = ev.seconds - (stageTimes.heard || 0) - (stageTimes.translated || 0);
+    renderTimings(ev.seconds);
+    status(`done in ${ev.seconds}s`, "var(--green)");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Result screen: sentences arriving live
+// ─────────────────────────────────────────────────────────────
+function openResultScreen() {
+  $("resultCount").textContent =
+    expectedChunks === 1 ? "1 SENTENCE" : `${expectedChunks} SENTENCES`;
+  // Draw a placeholder row for every sentence we're expecting, so you can
+  // see what's still coming rather than watching rows appear from nowhere.
+  $("sentenceList").innerHTML = "";
+  for (let i = 1; i <= expectedChunks; i++) {
+    const row = document.createElement("div");
+    row.className = "srow pending";
+    row.id = `srow-${i}`;
+    row.innerHTML = `
+      <div class="sicon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+        stroke="var(--faint)" stroke-width="2.4" stroke-linecap="round">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.3"/>
+        <path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg></div>
+      <div style="flex-grow:1">
+        <div class="ssrc">generating…</div>
+      </div>`;
+    $("sentenceList").appendChild(row);
+  }
+  show("s-result");
+}
+
+function addSentence(ev) {
+  const row = $(`srow-${ev.index}`);
+
+  if (ev.status === "error") {
+    // One sentence failed. Keep its text visible so the work isn't lost.
+    row.className = "srow";
+    row.innerHTML = `
+      <div class="sicon" style="border-color:var(--red)">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--red)"
+          stroke-width="2.6" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+      <div style="flex-grow:1">
+        <div class="ssrc">${escapeHtml(ev.source)}</div>
+        <div class="stxt" style="color:var(--muted)">${escapeHtml(ev.text)}</div>
+        <div class="ssrc" style="color:var(--red);margin-top:4px">couldn't generate audio</div>
+      </div>`;
+    // Don't let a failed sentence stall the queue behind it.
+    if (playCursor === ev.index) { playCursor++; tryPlayNext(); }
+    return;
+  }
+
+  const bytes = Uint8Array.from(atob(ev.audio), c => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: "audio/wav" });
+  const audio = new Audio(URL.createObjectURL(blob));
+
+  sentences[ev.index - 1] = { index: ev.index, source: ev.source, text: ev.text, blob, audio };
+
+  row.className = "srow";
+  row.innerHTML = `
+    <div class="sicon" id="sicon-${ev.index}">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)"
+        style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg></div>
+    <div style="flex-grow:1">
+      <div class="ssrc">${escapeHtml(ev.source)}</div>
+      <div class="stxt">${escapeHtml(ev.text)}</div>
+    </div>
+    <span class="mono" style="font-size:10.5px;color:var(--faint);flex-shrink:0">${ev.seconds}s</span>`;
+
+  // Clicking a row replays just that sentence.
+  $(`sicon-${ev.index}`).onclick = () => {
+    stopPlayback();
+    playCursor = ev.index;
+    tryPlayNext();
+  };
+
+  updateFilename();
+  tryPlayNext();
+}
+
+// Plays sentences strictly in order. If the next one hasn't arrived yet
+// this simply stops; addSentence() calls back in when it lands, so the
+// queue resumes on its own without polling.
+function tryPlayNext() {
+  if (isPlaying) return;
+  const s = sentences[playCursor - 1];
+  if (!s) return;
+
+  isPlaying = true;
+  const row = $(`srow-${s.index}`);
+  if (row) row.classList.add("playing");
+  status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
+
+  s.audio.currentTime = 0;
+  s.audio.play().catch(() => {});
+  s.audio.onended = () => {
+    isPlaying = false;
+    if (row) row.classList.remove("playing");
+    playCursor++;
+    tryPlayNext();
+  };
+}
+
+function stopPlayback() {
+  sentences.forEach(s => { if (s) { s.audio.pause(); s.audio.onended = null; } });
+  document.querySelectorAll(".srow.playing").forEach(r => r.classList.remove("playing"));
+  isPlaying = false;
+}
+
+function renderTimings(total) {
+  const parts = [
+    ["heard", stageTimes.heard, "var(--green)"],
+    ["translated", stageTimes.translated, "oklch(0.70 0.15 200)"],
+    ["voice", Math.max(stageTimes.voice, 0.1).toFixed(1), "var(--accent)"],
+  ];
+  $("timings").innerHTML = parts.map(([label, secs, color]) => `
+    <div style="flex-grow:${Math.max(secs * 10, 6)};display:flex;flex-direction:column;gap:5px">
+      <div style="height:3px;background:${color};border-radius:2px"></div>
+      <span style="font-size:10.5px;color:var(--faint)">${label} ${secs}s</span>
+    </div>`).join("");
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
 }
 
 function handleStageError(ev) {
@@ -583,11 +730,8 @@ function handleStageError(ev) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Result
+// Filenames
 // ─────────────────────────────────────────────────────────────
-// Speech starts with filler, so naming a file from the first few words gives
-// you "um-so-i-was.wav". Dropping fillers and common grammar words leaves the
-// words you'd actually search for later — "meet-tuesday-instead.wav".
 const FILLER = new Set(("um uh er ah mm hmm oh yeah okay so well like just really actually " +
   "basically i you he she it we they me him her us them my your his its our their " +
   "the a an and or but if then that this these those there here what when where how " +
@@ -598,80 +742,81 @@ const FILLER = new Set(("um uh er ah mm hmm oh yeah okay so well like just reall
 function slugify(text) {
   const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().split(/\s+/);
   const meaty = words.filter(w => w.length > 2 && !FILLER.has(w));
-  // If a sentence is all filler ("so I was just thinking"), fall back to the
-  // raw words rather than producing an empty name.
   const chosen = (meaty.length ? meaty : words).slice(0, 4);
   return chosen.join("-").slice(0, 60) || "translation";
 }
 
-function showResult() {
-  $("heard").textContent = heardText;
-  $("translated").textContent = translatedText;
+let resultName = "translation.wav";
+function updateFilename() {
   resultName = `${slugify(heardText)}-${$("lang").value}.wav`;
   $("filename").textContent = resultName;
-
-  if (resultAudio) URL.revokeObjectURL(resultAudio.src);
-  resultAudio = new Audio(URL.createObjectURL(resultBlob));
-  resultAudio.addEventListener("loadedmetadata", () => {
-    const d = resultAudio.duration;
-    $("dur").textContent = `0:${String(Math.round(d)).padStart(2, "0")}`;
-  });
-  resultAudio.addEventListener("timeupdate", paintProgress);
-  resultAudio.addEventListener("ended", () => { setPlayIcon(false); paintProgress(); });
-
-  $("resultBars").innerHTML = Array.from({ length: 28 },
-    () => `<i style="height:${8 + Math.random() * 26}px"></i>`).join("");
-
-  const total = (stageTimes.heard + stageTimes.translated + stageTimes.voice).toFixed(1);
-  $("timings").innerHTML = [
-    ["heard", stageTimes.heard, "var(--green)"],
-    ["translated", stageTimes.translated, "oklch(0.70 0.15 200)"],
-    ["voice", stageTimes.voice, "var(--accent)"],
-  ].map(([label, secs, color]) => `
-    <div style="flex-grow:${Math.max(secs * 10, 6)};display:flex;flex-direction:column;gap:5px">
-      <div style="height:3px;background:${color};border-radius:2px"></div>
-      <span style="font-size:10.5px;color:var(--faint)">${label} ${secs}s</span>
-    </div>`).join("");
-
-  show("s-result");
-  status(`done in ${total}s`, "var(--green)");
-  paintProgress();
 }
 
-function paintProgress() {
-  const bars = [...$("resultBars").children];
-  const frac = resultAudio && resultAudio.duration
-    ? resultAudio.currentTime / resultAudio.duration : 0;
-  bars.forEach((b, i) => {
-    b.style.background = (i / bars.length) < frac ? "var(--accent)" : "oklch(0.34 0.012 75)";
-  });
-}
-
-function setPlayIcon(playing) {
-  $("playIcon").innerHTML = playing
-    ? `<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>`
-    : `<polygon points="6 4 20 12 6 20"/>`;
-  $("playIcon").style.marginLeft = playing ? "0" : "3px";
-}
-
-$("playBtn").addEventListener("click", () => {
-  if (!resultAudio) return;
-  if (resultAudio.paused) { resultAudio.play(); setPlayIcon(true); }
-  else { resultAudio.pause(); setPlayIcon(false); }
+$("againBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
+$("redoBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
+$("replayAllBtn").addEventListener("click", () => {
+  stopPlayback();
+  playCursor = 1;
+  tryPlayNext();
 });
 
-$("againBtn").addEventListener("click", () => { show("s-idle"); status("ready"); });
-$("redoBtn").addEventListener("click", () => { show("s-idle"); status("ready"); });
+// ─────────────────────────────────────────────────────────────
+// Saving — joins every sentence into one file
+// ─────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────
-// Saving — a real folder picker, not the downloads bin
-// ─────────────────────────────────────────────────────────────
+// Each sentence comes back as its own WAV. To save one file we have to
+// stitch them: read each one's audio data out of its container, join the
+// data, and write a fresh header describing the combined length.
+async function joinWavs(blobs) {
+  const bufs = await Promise.all(blobs.map(b => b.arrayBuffer()));
+
+  const parts = bufs.map(buf => {
+    const view = new DataView(buf);
+    // Walk the RIFF chunks rather than assuming a 44-byte header — the
+    // header size varies and guessing produces a click at every join.
+    let pos = 12, fmt = null, data = null;
+    while (pos + 8 <= view.byteLength) {
+      const id = String.fromCharCode(view.getUint8(pos), view.getUint8(pos + 1),
+                                     view.getUint8(pos + 2), view.getUint8(pos + 3));
+      const size = view.getUint32(pos + 4, true);
+      if (id === "fmt ") fmt = { offset: pos + 8, size };
+      if (id === "data") { data = { offset: pos + 8, size }; break; }
+      pos += 8 + size + (size % 2);
+    }
+    return { buf, view, fmt, data };
+  });
+
+  const first = parts[0];
+  const channels   = first.view.getUint16(first.fmt.offset + 2, true);
+  const sampleRate = first.view.getUint32(first.fmt.offset + 4, true);
+  const bits       = first.view.getUint16(first.fmt.offset + 14, true);
+
+  const totalData = parts.reduce((n, p) => n + p.data.size, 0);
+  const out = new ArrayBuffer(44 + totalData);
+  const ov = new DataView(out);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) ov.setUint8(o + i, s.charCodeAt(i)); };
+
+  w(0, "RIFF"); ov.setUint32(4, 36 + totalData, true); w(8, "WAVEfmt ");
+  ov.setUint32(16, 16, true); ov.setUint16(20, 1, true);
+  ov.setUint16(22, channels, true); ov.setUint32(24, sampleRate, true);
+  ov.setUint32(28, sampleRate * channels * bits / 8, true);
+  ov.setUint16(32, channels * bits / 8, true); ov.setUint16(34, bits, true);
+  w(36, "data"); ov.setUint32(40, totalData, true);
+
+  let offset = 44;
+  for (const p of parts) {
+    new Uint8Array(out).set(new Uint8Array(p.buf, p.data.offset, p.data.size), offset);
+    offset += p.data.size;
+  }
+  return new Blob([out], { type: "audio/wav" });
+}
+
 $("saveBtn").addEventListener("click", async () => {
-  if (!resultBlob) return;
+  const blobs = sentences.filter(Boolean).map(s => s.blob);
+  if (!blobs.length) return;
 
-  // showSaveFilePicker opens the actual macOS save dialog, so you choose
-  // the folder and filename. Chrome and Edge only — everywhere else falls
-  // back to an ordinary download.
+  const combined = blobs.length === 1 ? blobs[0] : await joinWavs(blobs);
+
   if (window.showSaveFilePicker) {
     try {
       const handle = await window.showSaveFilePicker({
@@ -679,16 +824,15 @@ $("saveBtn").addEventListener("click", async () => {
         types: [{ description: "WAV audio", accept: { "audio/wav": [".wav"] } }],
       });
       const writable = await handle.createWritable();
-      await writable.write(resultBlob);
+      await writable.write(combined);
       await writable.close();
       status("saved", "var(--green)");
     } catch (err) {
-      // Cancelling the dialog throws AbortError — that isn't a failure.
       if (err.name !== "AbortError") status("save failed", "var(--red)");
     }
   } else {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(resultBlob);
+    a.href = URL.createObjectURL(combined);
     a.download = resultName;
     a.click();
     URL.revokeObjectURL(a.href);
