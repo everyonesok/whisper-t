@@ -168,8 +168,8 @@
           </svg>
         </div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
-          <div style="font-size:21px;font-weight:500">Hold to speak</div>
-          <div style="font-size:13px;color:var(--muted)">Release when you're done</div>
+          <div style="font-size:21px;font-weight:500">Tap to speak</div>
+          <div style="font-size:13px;color:var(--muted)">Tap again when you're done</div>
         </div>
       </div>
       <div class="hint">
@@ -184,7 +184,7 @@
     </section>
 
     <!-- ============ RECORDING ============ -->
-    <section class="screen center" id="s-rec" hidden style="gap:32px">
+    <section class="screen center" id="s-rec" hidden style="gap:32px;cursor:pointer">
       <div style="display:flex;align-items:center;gap:9px">
         <span class="rec-dot" style="width:9px;height:9px;border-radius:50%;background:var(--red)"></span>
         <span class="mono" style="font-size:14px;font-weight:500;color:var(--red);letter-spacing:0.04em">RECORDING</span>
@@ -205,7 +205,10 @@
           <span style="font-size:10.5px;color:var(--faint)">VERY LONG</span>
         </div>
       </div>
-      <div style="font-size:14px;color:var(--muted)">Release to translate</div>
+      <button class="btn" id="stopBtn" style="background:var(--raised);border:1px solid oklch(0.42 0.05 25);color:var(--text);flex-grow:0;padding:13px 22px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+        Stop and translate
+      </button>
     </section>
 
     <!-- ============ PROCESSING ============ -->
@@ -454,16 +457,30 @@ function stopRecording() {
   if (audioCtx) audioCtx.close();
 }
 
-// Hold-to-talk. Pointer events cover mouse and touch in one path.
-$("micBtn").addEventListener("pointerdown", e => { e.preventDefault(); startRecording(); });
+// Tap to start, tap again to stop.
+//
+// This was originally hold-to-talk, which is fine for one short sentence
+// but became the wrong interaction once several sentences were possible --
+// holding a button down for 20+ seconds while you talk is genuinely
+// uncomfortable, and multi-sentence input is the whole point of chunking.
+function toggleRecording() {
+  // `holding` covers the gap where we've asked for the microphone but the
+  // browser hasn't granted it yet, so a fast second tap still cancels.
+  const busy = holding || (recorder && recorder.state === "recording");
+  if (busy) stopRecording(); else startRecording();
+}
 
-// Release is watched on the WINDOW, not the button. Pressing swaps to the
-// recording screen, which hides the idle screen the button lives in — so a
-// pointerup bound to the button never arrives, and the recording never stops.
-// Listening on the window means releasing anywhere works.
-window.addEventListener("pointerup", stopRecording);
-window.addEventListener("pointercancel", stopRecording);
-window.addEventListener("blur", stopRecording);   // released after tabbing away
+$("micBtn").addEventListener("click", toggleRecording);
+$("stopBtn").addEventListener("click", stopRecording);
+
+// Tapping anywhere on the recording screen also stops, so you're never
+// hunting for a small target mid-sentence.
+$("s-rec").addEventListener("click", stopRecording);
+
+// Stop if the window loses focus. With hold-to-talk this caught a release
+// you made after tabbing away; with a toggle it matters more, since an
+// unattended tab would otherwise keep the microphone open.
+window.addEventListener("blur", stopRecording);
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") stopRecording();
 });
