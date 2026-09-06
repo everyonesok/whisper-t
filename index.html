@@ -135,8 +135,19 @@
     border: 1px solid var(--line); background: oklch(0.195 0.009 75);
     transition: border-color 0.2s, background 0.2s;
   }
-  .srow.playing { border-color: var(--accent); background: oklch(0.225 0.018 55); }
-  .srow.pending { opacity: 0.5; }
+  .srow.playing {
+    border-color: var(--accent); background: oklch(0.245 0.030 55);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .srow.pending { opacity: 0.65; border-style: dashed; }
+  /* A soft pulse so a row that is still generating reads as active work
+     rather than as a dead placeholder. */
+  @keyframes waiting { 0%,100% { opacity: 0.45 } 50% { opacity: 0.8 } }
+  .srow.pending .ssrc { animation: waiting 1.8s ease-in-out infinite; }
+  .nowplaying {
+    font-size: 10px; letter-spacing: 0.08em; color: var(--accent);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  }
   .srow .sicon {
     width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
@@ -512,7 +523,7 @@ async function onRecordingStopped() {
   }
 
   heardText = ""; translatedText = ""; stageTimes = {};
-  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0;
+  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0; genTimes = [];
   $("sentenceList").innerHTML = "";
   $("timings").innerHTML = "";
 
@@ -617,7 +628,7 @@ function openResultScreen() {
         <circle cx="12" cy="12" r="10" stroke-opacity="0.3"/>
         <path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg></div>
       <div style="flex-grow:1">
-        <div class="ssrc">generating…</div>
+        <div class="ssrc" id="swait-${i}">waiting to generate…</div>
       </div>`;
     $("sentenceList").appendChild(row);
   }
@@ -670,7 +681,26 @@ function addSentence(ev) {
   };
 
   updateFilename();
+  updatePendingEstimates(ev.seconds);
   tryPlayNext();
+}
+
+// Once one sentence has been generated we know roughly how long the rest
+// will take, so the remaining rows can say "~9s" instead of leaving you
+// staring at an open-ended spinner.
+let genTimes = [];
+function updatePendingEstimates(lastSeconds) {
+  if (lastSeconds) genTimes.push(lastSeconds);
+  if (!genTimes.length) return;
+  const avg = genTimes.reduce((a, b) => a + b, 0) / genTimes.length;
+
+  let ahead = 0;
+  for (let i = 1; i <= expectedChunks; i++) {
+    if (sentences[i - 1]) continue;          // already done
+    ahead++;
+    const el = $(`swait-${i}`);
+    if (el) el.textContent = `generating… about ${Math.round(avg * ahead)}s away`;
+  }
 }
 
 // Plays sentences strictly in order. If the next one hasn't arrived yet
@@ -683,15 +713,32 @@ function tryPlayNext() {
 
   isPlaying = true;
   const row = $(`srow-${s.index}`);
-  if (row) row.classList.add("playing");
+  if (row) {
+    row.classList.add("playing");
+    // An explicit label, because a border tint alone is easy to miss while
+    // you're listening rather than watching.
+    const src = row.querySelector(".ssrc");
+    if (src && !src.dataset.orig) src.dataset.orig = src.textContent;
+    if (src) src.innerHTML =
+      `<span class="nowplaying">▸ PLAYING NOW</span> &nbsp;${escapeHtml(src.dataset.orig)}`;
+  }
   status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
 
   s.audio.currentTime = 0;
   s.audio.play().catch(() => {});
   s.audio.onended = () => {
     isPlaying = false;
-    if (row) row.classList.remove("playing");
+    if (row) {
+      row.classList.remove("playing");
+      const src = row.querySelector(".ssrc");
+      if (src && src.dataset.orig) src.textContent = src.dataset.orig;
+    }
     playCursor++;
+    // If the next sentence hasn't arrived, say so rather than falling silent
+    // with no explanation.
+    if (!sentences[playCursor - 1] && playCursor <= expectedChunks) {
+      status(`waiting for sentence ${playCursor}…`, "var(--amber)");
+    }
     tryPlayNext();
   };
 }
