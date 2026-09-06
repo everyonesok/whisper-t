@@ -1,6 +1,6 @@
 # echo
 
-Speak a sentence in English, hear it back in another language — **in your own voice**.
+Speak in English, hear it back in another language — **in your own voice**.
 
 A learning prototype. Everything except the translation runs locally on your own machine, and no model is ever trained on your voice.
 
@@ -14,7 +14,7 @@ Three stages chained together:
 
 ```mermaid
 flowchart LR
-    A[Your voice] --> B["Speech → text<br/><i>faster-whisper</i><br/>local · ~1.4s"]
+    A[Your voice] --> B["Speech → text<br/>+ split into sentences<br/><i>faster-whisper</i><br/>local · ~1.4s"]
     B --> C["Translate<br/><i>Claude</i><br/>API · ~2.3s"]
     C --> D["Text → your voice<br/><i>Chatterbox</i><br/>local · ~11s"]
     D --> E[Cloned audio]
@@ -67,30 +67,53 @@ Aim for 15–20 seconds of continuous, natural speech in a quiet room without ec
 .venv/bin/python server.py            # ~1 minute to load models, then open localhost:8000
 ```
 
-Hold the button, say **one sentence**, release.
+Tap the microphone, speak, tap **Stop and translate**.
+
+You can say several sentences. They're split at sentence boundaries and
+played back one at a time, so you hear the first one while the rest are
+still being generated.
 
 ---
 
 ## Performance
 
-Measured on an M3 MacBook Air, short sentence:
+Measured on an M3 MacBook Air.
+
+**One sentence** — about 15 seconds end to end:
 
 | Stage | Time | Where |
 |---|---|---|
 | Speech → text | 1.4s | local (CPU) |
 | Translate | 2.3s | Anthropic API |
 | Voice generation | 11.4s | local (Apple GPU) |
-| **Total** | **~15s** | |
 
-Generation time scales with how much you say, and **badly** — a full paragraph took 102 seconds. The interface pushes you toward single sentences with a live length meter, and caps recordings at 30 seconds.
+**Several sentences** — each one is translated and spoken separately, so
+playback starts long before the last one is finished:
 
-The model is warmed up at startup with a throwaway generation, because the first run after loading is roughly 4× slower than the rest.
+| | First audio | All finished |
+|---|---|---|
+| one long clip (the old way) | 89.6s | 89.6s |
+| sentence at a time | **21.6s** | 49.6s |
 
----
+Chunking is 4.3x faster to first sound, and 1.8x faster overall — three
+short generations beat one long one, because long inputs make the voice
+model degrade (sampling slows from ~15 to ~1 tokens/sec and it can force
+an early stop on repetition).
+
+Voice generation is the bottleneck and it can't be parallelised: one
+Chatterbox model on one GPU deadlocks if called from several threads, so
+sentences queue. Translations do run concurrently, since they're just
+network calls.
+
+Recordings are capped at 30 seconds, and speech with no full stop is
+broken at the last comma so a rambling sentence can't stall the queue.
+
+The models are warmed up at startup with a throwaway generation, because
+the first run after loading is roughly 4x slower than the rest.
 
 ## Limitations
 
-- **Not real-time.** Press, speak, release, wait. Simultaneous interpretation is a substantially harder problem.
+- **Not real-time.** Tap, speak, tap, wait. Sentences arrive one at a time rather than all at the end, but simultaneous interpretation is a substantially harder problem.
 - **Your accent is the model's, not yours.** Cross-lingual cloning transfers vocal timbre convincingly, but prosody comes from the model. It sounds recognisably like you speaking with a slight accent.
 - **English input only.** `small.en` is English-only; switch `WHISPER_MODEL` in `pipeline.py` to `large-v3-turbo` for multilingual input at roughly 8× the transcription cost.
 - **Russian stress marks are missing.** Chatterbox wants an optional `russian_text_stresser` package that isn't on PyPI, so stress placement is guessed. Occasionally audible — *кофе* can drift toward *кафе*.
@@ -128,15 +151,17 @@ To see every code the installed model accepts:
 
 ```
 pipeline.py      The three stages. Loads models once, keeps them warm.
-server.py        FastAPI. Streams progress per stage as NDJSON.
+server.py        FastAPI. Streams a JSON event per sentence as each finishes.
 index.html       The interface — one file, no build step.
 check_key.py     Verifies your API key without printing it.
 smoke_test.py    Proves voice cloning works before you build on it.
+test_buffer.py   Unit tests for sentence chunking — no models, runs instantly.
+bench_streaming.py  Measures chunked vs one-clip generation.
 *.dc.html        Design source for the seven interface states.
 canvas.json      Layout for those design artboards.
 ```
 
-Progress in the UI is **real**, not a timer: the server emits an event as each stage completes, and the page renders what it receives.
+Progress in the UI is **real**, not a timer: the server emits an event as each stage and each sentence completes, and the page plays audio as it arrives.
 
 ---
 
