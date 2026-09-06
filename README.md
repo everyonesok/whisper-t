@@ -95,10 +95,16 @@ playback starts long before the last one is finished:
 | one long clip (the old way) | 89.6s | 89.6s |
 | sentence at a time | **21.6s** | 49.6s |
 
-Chunking is 4.3x faster to first sound, and 1.8x faster overall — three
-short generations beat one long one, because long inputs make the voice
-model degrade (sampling slows from ~15 to ~1 tokens/sec and it can force
-an early stop on repetition).
+Chunking is 4.3x faster to first sound here, and 1.8x faster overall —
+three short generations beat one long one, because long inputs make the
+voice model degrade (sampling slows from ~15 to ~1 tokens/sec and it can
+force an early stop on repetition).
+
+**That figure depends on what you say.** Chunking stops later sentences
+queuing behind earlier ones; it does nothing to make any single sentence
+faster. A two-sentence recording measured closer to 2x, and one short
+sentence gains nothing at all, because the first sentence still takes its
+full ~12s to generate either way.
 
 Voice generation is the bottleneck and it can't be parallelised: one
 Chatterbox model on one GPU deadlocks if called from several threads, so
@@ -155,6 +161,7 @@ server.py        FastAPI. Streams a JSON event per sentence as each finishes.
 index.html       The interface — one file, no build step.
 check_key.py     Verifies your API key without printing it.
 smoke_test.py    Proves voice cloning works before you build on it.
+chunk_test.py    Shows how a recording splits into sentences.
 test_buffer.py   Unit tests for sentence chunking — no models, runs instantly.
 bench_streaming.py  Measures chunked vs one-clip generation.
 *.dc.html        Design source for the seven interface states.
@@ -165,13 +172,19 @@ Progress in the UI is **real**, not a timer: the server emits an event as each s
 
 ---
 
-## Two bugs worth knowing about
+## Things that bit us
 
-Both were found during development and are fixed here, but they're the kind that recur:
+All fixed here, but they're the kind that recur:
 
 **Whisper invents words from silence.** Four seconds of silence and a pure 220Hz tone both transcribed as `"You"` — which would then be translated and spoken in your cloned voice as though you'd said it. Fixed by enabling voice-activity detection, which strips non-speech before transcription.
 
-**A press that hides its own button never gets a release.** The mic button lived on a screen that gets hidden the moment recording starts, so `pointerup` bound to the button never fired and recording ran forever. Release is now watched on the window.
+**A press that hides its own button never gets a release.** The mic button lived on a screen that gets hidden the moment recording starts, so `pointerup` bound to the button never fired and recording ran forever. Release is now watched on the window rather than the button.
+
+**One voice model can't be shared across threads.** Generating three sentences in parallel deadlocked outright — CPU flat at 0%, no progress, had to be killed. Voice generation queues; only the translations run concurrently.
+
+**faster-whisper isn't usefully lazy.** `transcribe()` returns a generator in 0.07s, which looks like streaming, but the first `next()` does all the work — all segments land at the same instant. Whisper works in 30-second windows, so anything shorter is one atomic pass. Chunking helps *after* transcription, not during it.
+
+**Sentence boundaries don't come from silence.** Neither VAD pauses nor Whisper's own segment timestamps line up with sentences — both split mid-sentence. The transcript's punctuation is the only reliable boundary, so text is buffered until it ends in `.`, `?` or `!`.
 
 ---
 
