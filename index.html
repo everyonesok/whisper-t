@@ -165,7 +165,15 @@
 <div class="app">
   <header>
     <div class="brand"><span class="dot"></span><span>echo</span></div>
-    <select id="lang"></select>
+    <div style="display:flex;align-items:center;gap:9px">
+      <button id="histBtn" title="Saved clips" style="display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line2);border-radius:7px;background:var(--raised);color:var(--text);font-family:inherit;font-size:13px;cursor:pointer">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
+        </svg>
+        <span id="histCount"></span>
+      </button>
+      <select id="lang"></select>
+    </div>
   </header>
 
   <main>
@@ -296,6 +304,16 @@
       </div>
     </section>
 
+    <!-- ============ HISTORY ============ -->
+    <section class="screen" id="s-history" hidden style="gap:14px;padding:22px 24px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span class="label">SAVED CLIPS</span>
+        <button class="linkish" id="histBackBtn">Back</button>
+      </div>
+      <div id="histList" style="display:flex;flex-direction:column;gap:9px;overflow-y:auto;flex-grow:1"></div>
+      <div class="mono" style="font-size:10.5px;color:var(--faint);line-height:1.5" id="histFooter"></div>
+    </section>
+
     <!-- ============ ERROR / DENIED ============ -->
     <section class="screen" id="s-error" hidden style="justify-content:center;gap:24px;padding:32px 34px">
       <div style="width:52px;height:52px;border-radius:50%;background:oklch(0.22 0.020 25);border:1px solid oklch(0.34 0.05 25);display:flex;align-items:center;justify-content:center">
@@ -329,7 +347,7 @@
 let stream, recorder, chunks = [], startedAt = 0, tick, audioCtx, analyser, rafId;
 
 const $ = id => document.getElementById(id);
-const screens = ["s-idle", "s-rec", "s-proc", "s-result", "s-error"];
+const screens = ["s-idle", "s-rec", "s-proc", "s-result", "s-error", "s-history"];
 
 function show(id) {
   screens.forEach(s => $(s).hidden = (s !== id));
@@ -354,7 +372,6 @@ $("lang").addEventListener("change", updateTarget);
 function updateTarget() {
   const code = $("lang").value;
   $("statusRight").textContent = `en → ${code}`;
-  $("targetLabel").textContent = (LANGS[code] || "").toUpperCase();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -603,6 +620,7 @@ function handleEvent(ev) {
   }
 
   if (ev.stage === "complete") {
+    if (ev.saved) refreshHistoryCount();
     stageTimes.voice = ev.seconds - (stageTimes.heard || 0) - (stageTimes.translated || 0);
     renderTimings(ev.seconds);
     status(`done in ${ev.seconds}s`, "var(--green)");
@@ -851,9 +869,15 @@ async function joinWavs(blobs) {
   });
 
   const first = parts[0];
-  const channels   = first.view.getUint16(first.fmt.offset + 2, true);
-  const sampleRate = first.view.getUint32(first.fmt.offset + 4, true);
-  const bits       = first.view.getUint16(first.fmt.offset + 14, true);
+  // Read the format tag rather than assuming 1 (integer PCM). The voice
+  // model writes 32-bit FLOAT wavs, tag 3 — declaring those as integer
+  // produces a file whose header contradicts its contents, which plays
+  // back as noise. This only shows up on real audio; synthetic 16-bit
+  // test files hide it.
+  const audioFormat = first.view.getUint16(first.fmt.offset, true);
+  const channels    = first.view.getUint16(first.fmt.offset + 2, true);
+  const sampleRate  = first.view.getUint32(first.fmt.offset + 4, true);
+  const bits        = first.view.getUint16(first.fmt.offset + 14, true);
 
   const totalData = parts.reduce((n, p) => n + p.data.size, 0);
   const out = new ArrayBuffer(44 + totalData);
@@ -861,7 +885,7 @@ async function joinWavs(blobs) {
   const w = (o, s) => { for (let i = 0; i < s.length; i++) ov.setUint8(o + i, s.charCodeAt(i)); };
 
   w(0, "RIFF"); ov.setUint32(4, 36 + totalData, true); w(8, "WAVEfmt ");
-  ov.setUint32(16, 16, true); ov.setUint16(20, 1, true);
+  ov.setUint32(16, 16, true); ov.setUint16(20, audioFormat, true);
   ov.setUint16(22, channels, true); ov.setUint32(24, sampleRate, true);
   ov.setUint32(28, sampleRate * channels * bits / 8, true);
   ov.setUint16(32, channels * bits / 8, true); ov.setUint16(34, bits, true);
@@ -903,6 +927,114 @@ $("saveBtn").addEventListener("click", async () => {
     status("downloaded", "var(--green)");
   }
 });
+
+// ─────────────────────────────────────────────────────────────
+// Saved clips
+// ─────────────────────────────────────────────────────────────
+// The server writes every finished translation to a history/ folder and
+// serves an index of it. Done server-side because a web page can't read a
+// folder from disk without a directory-handle permission dance that
+// doesn't survive between sessions — the server is a local process with
+// ordinary file access.
+let histAudio = null;
+
+function timeAgo(iso) {
+  const secs = (Date.now() - new Date(iso)) / 1000;
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 172800) return "yesterday";
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+async function refreshHistoryCount() {
+  try {
+    const clips = await (await fetch("/api/history")).json();
+    $("histCount").textContent = clips.length || "";
+  } catch { /* the badge is a nicety; never block on it */ }
+}
+
+async function openHistory() {
+  stopPlayback();
+  show("s-history");
+  $("histList").innerHTML = `<div class="ssrc" style="padding:8px">loading…</div>`;
+
+  let clips;
+  try {
+    clips = await (await fetch("/api/history")).json();
+  } catch {
+    $("histList").innerHTML = `<div class="ssrc" style="padding:8px">Couldn't reach the server.</div>`;
+    return;
+  }
+
+  if (!clips.length) {
+    $("histList").innerHTML =
+      `<div style="padding:20px 8px;color:var(--muted);font-size:13.5px;line-height:1.6">
+         Nothing saved yet.<br>
+         <span style="color:var(--faint)">Every translation you make is kept here automatically,
+         so you can come back and compare them.</span>
+       </div>`;
+    $("histFooter").textContent = "";
+    return;
+  }
+
+  $("histList").innerHTML = clips.map(c => `
+    <div class="srow" id="hrow-${c.id}">
+      <div class="sicon" data-play="${c.id}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)" style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg>
+      </div>
+      <div style="flex-grow:1;min-width:0">
+        <div class="ssrc" style="display:flex;gap:8px;align-items:center">
+          <span style="color:var(--accent)">${escapeHtml(c.language_name)}</span>
+          <span>·</span><span>${timeAgo(c.created)}</span>
+          <span>·</span><span>${c.duration}s</span>
+          ${c.sentences > 1 ? `<span>·</span><span>${c.sentences} sentences</span>` : ""}
+        </div>
+        <div class="stxt">${escapeHtml(c.translation)}</div>
+        <div class="ssrc" style="margin-top:3px;opacity:0.75">${escapeHtml(c.source)}</div>
+      </div>
+      <button data-del="${c.id}" title="Delete"
+        style="background:none;border:none;cursor:pointer;color:var(--faint);padding:2px;flex-shrink:0">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>`).join("");
+
+  const langs = [...new Set(clips.map(c => c.language_name))];
+  $("histFooter").textContent =
+    `${clips.length} clip${clips.length === 1 ? "" : "s"} · ${langs.join(", ")} · stored in history/`;
+
+  // Play — one at a time, and clicking a second clip stops the first.
+  $("histList").querySelectorAll("[data-play]").forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.play;
+      if (histAudio) { histAudio.pause(); }
+      document.querySelectorAll("#histList .srow").forEach(r => r.classList.remove("playing"));
+      histAudio = new Audio(`/api/history/${id}.wav`);
+      $(`hrow-${id}`).classList.add("playing");
+      histAudio.onended = () => $(`hrow-${id}`)?.classList.remove("playing");
+      histAudio.play().catch(() => $(`hrow-${id}`)?.classList.remove("playing"));
+    };
+  });
+
+  $("histList").querySelectorAll("[data-del]").forEach(el => {
+    el.onclick = async () => {
+      const id = el.dataset.del;
+      if (histAudio) histAudio.pause();
+      await fetch(`/api/history/${id}`, { method: "DELETE" });
+      openHistory();
+      refreshHistoryCount();
+    };
+  });
+}
+
+$("histBtn").addEventListener("click", openHistory);
+$("histBackBtn").addEventListener("click", () => {
+  if (histAudio) histAudio.pause();
+  show("s-idle");
+  status("ready");
+});
+refreshHistoryCount();
 
 // ─────────────────────────────────────────────────────────────
 // Errors

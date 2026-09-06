@@ -1,6 +1,12 @@
 # ── Secrets ───────────────────────────────────────────────
 .env
 
+# ── Saved clip history ────────────────────────────────────
+# Recordings of your voice AND transcripts of everything you said.
+# The .json sidecars are text, so they'd otherwise sail past the
+# audio rules below.
+history/
+
 # ── Personal voice recordings ─────────────────────────────
 # Your reference voice and everything generated from it stays on your
 # machine. Anyone cloning this repo records their own.

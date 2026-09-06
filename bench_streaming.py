@@ -22,8 +22,11 @@ Which is fine. The win was never "generate faster" -- it's "get the FIRST
 chunk playable early", so playback starts while the rest still generates.
 """
 import sys, time, os
-sys.path.insert(0, "/Users/vlad/Documents/Claude/Projects/Translator")
-os.chdir("/Users/vlad/Documents/Claude/Projects/Translator")
+from pathlib import Path
+# Run from anywhere; paths resolve relative to this file.
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+os.chdir(HERE)
 from concurrent.futures import ThreadPoolExecutor
 from pipeline import VoiceTranslator
 

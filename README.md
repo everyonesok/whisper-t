@@ -117,6 +117,32 @@ broken at the last comma so a rambling sentence can't stall the queue.
 The models are warmed up at startup with a throwaway generation, because
 the first run after loading is roughly 4x slower than the rest.
 
+---
+
+## Saved clips
+
+Every translation is written to a local `history/` folder automatically —
+audio plus a JSON sidecar with what you said, what it became, and how long
+it took. The clock icon in the header opens them, newest first.
+
+This exists so you can compare after the fact: the same sentence in Russian
+and Japanese, side by side, without having to decide in advance that you'd
+want to.
+
+The **server** does this, not the browser. A web page can't read a folder
+from disk without a directory-handle permission dance that doesn't survive
+between sessions; the server is a local process with ordinary file access.
+
+**These are recordings of your voice and transcripts of everything you've
+said.** `history/` is gitignored — including the `.json` sidecars, which are
+text and would otherwise sail past the audio rules. Delete any clip from the
+list, or empty the folder.
+
+The **Save** button is a different thing and still there: it exports the
+current translation to a folder you pick, for taking elsewhere.
+
+---
+
 ## Limitations
 
 - **Not real-time.** Tap, speak, tap, wait. Sentences arrive one at a time rather than all at the end, but simultaneous interpretation is a substantially harder problem.
@@ -159,6 +185,7 @@ To see every code the installed model accepts:
 pipeline.py      The three stages. Loads models once, keeps them warm.
 server.py        FastAPI. Streams a JSON event per sentence as each finishes.
 index.html       The interface — one file, no build step.
+history/         Saved clips (gitignored — your voice, your transcripts).
 check_key.py     Verifies your API key without printing it.
 smoke_test.py    Proves voice cloning works before you build on it.
 chunk_test.py    Shows how a recording splits into sentences.
@@ -183,6 +210,8 @@ All fixed here, but they're the kind that recur:
 **One voice model can't be shared across threads.** Generating three sentences in parallel deadlocked outright — CPU flat at 0%, no progress, had to be killed. Voice generation queues; only the translations run concurrently.
 
 **faster-whisper isn't usefully lazy.** `transcribe()` returns a generator in 0.07s, which looks like streaming, but the first `next()` does all the work — all segments land at the same instant. Whisper works in 30-second windows, so anything shorter is one atomic pass. Chunking helps *after* transcription, not during it.
+
+**Not every WAV is integer PCM.** The voice model writes 32-bit *float* WAVs (format tag 3). Python's `wave` module refuses those outright ("unknown format: 3"), and a joiner that hardcodes tag 1 in its output header produces a file whose header contradicts its contents — which plays as noise. Both joiners now read the tag from the source. Synthetic 16-bit test files hide this completely.
 
 **Sentence boundaries don't come from silence.** Neither VAD pauses nor Whisper's own segment timestamps line up with sentences — both split mid-sentence. The transcript's punctuation is the only reliable boundary, so text is buffered until it ends in `.`, `?` or `!`.
 

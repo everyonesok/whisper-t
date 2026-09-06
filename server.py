@@ -15,14 +15,18 @@ Wait for "ready" before opening the page.
 
 import base64
 import json
+import re
 import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, Form
+import torch
+import torchaudio as ta
+from fastapi import FastAPI, UploadFile, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
 from pipeline import VoiceTranslator, LANGUAGES
@@ -53,6 +57,104 @@ def index():
 @app.get("/api/languages")
 def languages():
     return LANGUAGES
+
+
+# ── Clip history ──────────────────────────────────────────────────────
+#
+# Every finished translation is written to history/ so you can come back
+# and compare them — the same sentence in Japanese and Russian, say.
+#
+# The server does this rather than the browser because a web page can't
+# read a folder from disk without a permission dance that breaks between
+# sessions. The server is a local process with ordinary file access, so
+# it just writes files and serves an index of them.
+#
+# Each clip is two files: <id>.wav (all sentences joined) and <id>.json
+# (what you said, what it became, how long it took). Separate sidecars
+# rather than one shared index file, so a write can't corrupt the lot.
+HISTORY = HERE / "history"
+HISTORY.mkdir(exist_ok=True)
+
+
+def join_wavs(paths, out_path):
+    """
+    Concatenate WAV files into one.
+
+    Uses torchaudio rather than Python's built-in `wave` module, because
+    the model writes 32-bit float WAVs (format tag 3) and `wave` only
+    handles integer PCM — it raises "unknown format: 3" and leaves a
+    zero-byte file behind.
+    """
+    audio = [ta.load(str(p)) for p in paths]
+    sample_rate = audio[0][1]
+    combined = torch.cat([wav for wav, _ in audio], dim=1)
+    ta.save(str(out_path), combined, sample_rate)
+    return combined.shape[1] / sample_rate      # duration in seconds
+
+
+def save_to_history(language, sentences, translations, wav_paths, total_seconds):
+    """Write one finished translation into the history folder."""
+    if not wav_paths:
+        return None
+
+    stamp = datetime.now()
+    clip_id = f"{stamp:%Y%m%d-%H%M%S}-{language}"
+
+    duration = round(join_wavs(wav_paths, HISTORY / f"{clip_id}.wav"), 1)
+
+    meta = {
+        "id": clip_id,
+        "created": stamp.isoformat(timespec="seconds"),
+        "language": language,
+        "language_name": LANGUAGES.get(language, language),
+        "source": " ".join(sentences),
+        "translation": " ".join(translations),
+        "sentences": len(sentences),
+        "seconds": total_seconds,
+        "duration": duration,
+    }
+    (HISTORY / f"{clip_id}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1))
+    return meta
+
+
+@app.get("/api/history")
+def history():
+    """Every saved clip, newest first."""
+    clips = []
+    for meta_file in HISTORY.glob("*.json"):
+        try:
+            clips.append(json.loads(meta_file.read_text()))
+        except (json.JSONDecodeError, OSError):
+            continue          # a half-written file shouldn't break the list
+    clips.sort(key=lambda c: c.get("created", ""), reverse=True)
+    return clips
+
+
+@app.get("/api/history/{clip_id}.wav")
+def history_audio(clip_id: str):
+    # Reject anything that isn't one of our own generated ids, so this
+    # can't be talked into serving arbitrary files off the disk.
+    if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-z]{2}", clip_id):
+        raise HTTPException(status_code=404)
+    path = HISTORY / f"{clip_id}.wav"
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="audio/wav")
+
+
+@app.delete("/api/history/{clip_id}")
+def history_delete(clip_id: str):
+    if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-z]{2}", clip_id):
+        raise HTTPException(status_code=404)
+    removed = 0
+    for suffix in (".wav", ".json"):
+        path = HISTORY / f"{clip_id}{suffix}"
+        if path.exists():
+            path.unlink()
+            removed += 1
+    if not removed:
+        raise HTTPException(status_code=404)
+    return {"deleted": clip_id}
 
 
 def to_wav(raw: bytes) -> str:
@@ -144,6 +246,8 @@ async def translate(audio: UploadFile, language: str = Form("ru")):
         # so out-of-order delivery would scramble the sentences.
         yield emit(stage="speak", status="start", chunks=len(sentences))
 
+        generated_paths = []          # kept so the clip can be saved to history
+
         for i, (source, translated) in enumerate(zip(sentences, translations), 1):
             t0 = time.time()
             try:
@@ -151,6 +255,7 @@ async def translate(audio: UploadFile, language: str = Form("ru")):
                 out.close()
                 translator.speak(translated, language, out.name)
                 wav_bytes = Path(out.name).read_bytes()
+                generated_paths.append(out.name)
             except Exception as e:
                 # One sentence failing shouldn't lose the others. Report it
                 # and carry on -- the page can play what did work and show
@@ -166,7 +271,19 @@ async def translate(audio: UploadFile, language: str = Form("ru")):
                        source=source, text=translated,
                        audio=base64.b64encode(wav_bytes).decode())
 
-        yield emit(stage="complete", seconds=round(time.time() - overall, 1))
+        total = round(time.time() - overall, 1)
+
+        # Saving is best-effort: a full disk or a permissions problem
+        # shouldn't lose a translation the user has already heard.
+        saved = None
+        try:
+            saved = save_to_history(language, sentences, translations,
+                                    generated_paths, total)
+        except Exception as e:
+            print(f"  could not save to history: {e}")
+
+        yield emit(stage="complete", seconds=total,
+                   saved=saved["id"] if saved else None)
 
     return StreamingResponse(run(), media_type="application/x-ndjson")
 
