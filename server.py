@@ -76,18 +76,45 @@ HISTORY = HERE / "history"
 HISTORY.mkdir(exist_ok=True)
 
 
-def join_wavs(paths, out_path):
+# How much each sentence overlaps the next when clips are joined. Each
+# sentence is generated separately, so each carries its own intonation —
+# a rise at the start, a fall at the end. Butted together they sound like
+# separate statements. A short crossfade blends the seam.
+#
+# 50ms is short enough to be inaudible as a fade and long enough to hide
+# the discontinuity. Voicebox exposes 0–200ms as a slider; 50 is a sensible
+# fixed default for speech.
+CROSSFADE_MS = 50
+
+
+def join_wavs(paths, out_path, crossfade_ms=CROSSFADE_MS):
     """
-    Concatenate WAV files into one.
+    Concatenate WAV files into one, crossfading each join.
 
     Uses torchaudio rather than Python's built-in `wave` module, because
     the model writes 32-bit float WAVs (format tag 3) and `wave` only
     handles integer PCM — it raises "unknown format: 3" and leaves a
     zero-byte file behind.
+
+    The crossfade overlaps the last `crossfade_ms` of one clip with the
+    first `crossfade_ms` of the next, fading one out as the other fades in.
+    Total length shrinks by that much per join.
     """
     audio = [ta.load(str(p)) for p in paths]
     sample_rate = audio[0][1]
-    combined = torch.cat([wav for wav, _ in audio], dim=1)
+    fade = int(sample_rate * crossfade_ms / 1000)
+
+    combined = audio[0][0]
+    for wav, _ in audio[1:]:
+        # Never fade more than either clip actually has.
+        n = min(fade, combined.shape[1], wav.shape[1])
+        if n <= 0:
+            combined = torch.cat([combined, wav], dim=1)
+            continue
+        ramp = torch.linspace(0.0, 1.0, n)
+        seam = combined[:, -n:] * (1.0 - ramp) + wav[:, :n] * ramp
+        combined = torch.cat([combined[:, :-n], seam, wav[:, n:]], dim=1)
+
     ta.save(str(out_path), combined, sample_rate)
     return combined.shape[1] / sample_rate      # duration in seconds
 

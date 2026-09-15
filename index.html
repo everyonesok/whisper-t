@@ -547,7 +547,7 @@ async function onRecordingStopped() {
   }
 
   heardText = ""; translatedText = ""; stageTimes = {};
-  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0; genTimes = [];
+  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0; genTimes = []; savedId = null;
   $("sentenceList").innerHTML = "";
   $("timings").innerHTML = "";
 
@@ -627,6 +627,7 @@ function handleEvent(ev) {
   }
 
   if (ev.stage === "complete") {
+    savedId = ev.saved || null;
     if (ev.saved) refreshHistoryCount();
     stageTimes.voice = ev.seconds - (stageTimes.heard || 0) - (stageTimes.translated || 0);
     renderTimings(ev.seconds);
@@ -836,6 +837,7 @@ function slugify(text) {
 }
 
 let resultName = "translation.wav";
+let savedId = null;   // history id from the server, once the clip is saved
 function updateFilename() {
   resultName = `${slugify(heardText)}-${$("lang").value}.wav`;
   $("filename").textContent = resultName;
@@ -910,7 +912,19 @@ $("saveBtn").addEventListener("click", async () => {
   const blobs = sentences.filter(Boolean).map(s => s.blob);
   if (!blobs.length) return;
 
-  const combined = blobs.length === 1 ? blobs[0] : await joinWavs(blobs);
+  // Prefer the file the server already wrote to history: it's joined with a
+  // crossfade at every seam, which the client-side joiner below doesn't do.
+  // The client join stays as a fallback for when history saving failed.
+  let combined = null;
+  if (savedId) {
+    try {
+      const r = await fetch(`/api/history/${savedId}.wav`);
+      if (r.ok) combined = await r.blob();
+    } catch { /* fall through to the client join */ }
+  }
+  if (!combined) {
+    combined = blobs.length === 1 ? blobs[0] : await joinWavs(blobs);
+  }
 
   if (window.showSaveFilePicker) {
     try {
