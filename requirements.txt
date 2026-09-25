@@ -1,17 +1,27 @@
-# Voice cloning + speech recognition
-chatterbox-tts==0.1.7
+# qwen-streaming branch: Qwen3-TTS on Apple's MLX runtime (ADR-0010).
+# Install into its own environment — these can't share one with main's
+# Chatterbox setup (it pins transformers==5.2.0; mlx-audio needs >=5.14):
+#
+#   uv venv --python 3.12 .venv-mlx
+#   uv pip install --python .venv-mlx/bin/python -r requirements.txt
+
+mlx-audio==0.5.6
 faster-whisper==1.2.1
-
-# Translation
 anthropic==1.3.0
-
-# Web server
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 python-multipart==0.0.32
 python-dotenv==1.2.3
 
-# Chatterbox's audio watermarker imports pkg_resources, which setuptools
-# removed in v81. Without this pin the model fails to load with a confusing
-# "'NoneType' object is not callable" error rather than a missing-module one.
-setuptools<81
+# Watermarking. Perth imports all of the below but declares none of them,
+# and hides the resulting ImportError as "'NoneType' object is not
+# callable" (ADR-0008). Every line here was found by hitting that error.
+resemble-perth==1.0.1
+librosa==0.11.0
+torch==2.6.0            # also used by server.py to join clips
+torchaudio==2.6.0       # pinned to main's version: 2.9+ changed audio loading
+soundfile
+pydub
+pyrubberband
+audioread
+setuptools<81           # perth needs pkg_resources, removed in 81

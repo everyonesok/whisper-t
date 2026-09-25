@@ -4,7 +4,9 @@ Speak in English, hear it back in another language — **in your own voice**.
 
 A learning prototype. Everything except the translation runs locally on your own machine, and no model is ever trained on your voice.
 
-![status](https://img.shields.io/badge/status-prototype-orange) ![python](https://img.shields.io/badge/python-3.11-blue) ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-lightgrey)
+> **This is the `qwen-streaming` branch.** It swaps the voice model from Chatterbox to **Qwen3-TTS on Apple's MLX runtime**: first sound roughly twice as soon, each sentence about three times faster, at the cost of 13 of the 22 languages ([ADR-0010](docs/adr/0010-qwen3-tts-on-mlx-for-voice-cloning.md)). `main` still runs Chatterbox with all 22.
+
+![status](https://img.shields.io/badge/status-prototype-orange) ![python](https://img.shields.io/badge/python-3.12-blue) ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-lightgrey)
 
 ---
 
@@ -16,11 +18,13 @@ Three stages chained together:
 flowchart LR
     A[Your voice] --> B["Speech → text<br/>+ split into sentences<br/><i>faster-whisper</i><br/>local · ~1.4s"]
     B --> C["Translate<br/><i>Claude</i><br/>API · ~2.3s"]
-    C --> D["Text → your voice<br/><i>Chatterbox</i><br/>local · ~11s"]
+    C --> D["Text → your voice<br/><i>Qwen3-TTS (MLX)</i><br/>local · ~4s"]
     D --> E[Cloned audio]
 ```
 
-**Nothing is trained.** Chatterbox does *zero-shot* voice cloning: your reference recording is passed in as an input on every generation, the way you'd hand a reference image to an image model. The model weights never change and never learn anything about you. Swap `reference.wav` and the next sentence uses the new voice immediately.
+**Nothing is trained.** Qwen3-TTS does *zero-shot* voice cloning: your reference recording is passed in as an input on every generation, the way you'd hand a reference image to an image model. The model weights never change and never learn anything about you.
+
+It also needs a transcript of that recording. echo makes one with Whisper the first time it starts and saves it as `reference.txt`, next to the audio. Re-record `reference.wav` and the transcript is rebuilt automatically on the next start.
 
 **Why Claude for the middle step.** Speech recognition faithfully transcribes disfluencies, so the input to translation looks like *"um so I was I was thinking maybe we could meet on Tuesday instead"*. Claude is instructed to clean that up and translate idiomatically, producing *"Я тут подумал, может, встретимся лучше во вторник?"* rather than a literal rendering complete with the stutter.
 
@@ -29,10 +33,11 @@ flowchart LR
 ## Requirements
 
 - **macOS on Apple Silicon.** It runs on CPU elsewhere, but roughly 2× slower.
-- **Python 3.11** (Chatterbox is developed and tested against it).
+- **Apple Silicon.** MLX is Apple's own runtime and only runs on M-series Macs.
+- **Python 3.12.**
 - **ffmpeg** — `brew install ffmpeg`.
 - **An Anthropic API key.** Translation costs about **$0.0015 per sentence**, so $5 covers a few thousand.
-- About **3GB of disk** for model weights, downloaded on first run.
+- About **5GB of disk**: ~2.7GB for the voice model, downloaded on first run, plus PyTorch for the watermark.
 
 ---
 
@@ -41,13 +46,14 @@ flowchart LR
 ```bash
 git clone <this repo> && cd whisper-t
 
-# Python 3.11 environment
-uv venv --python 3.11 .venv          # or: python3.11 -m venv .venv
-VIRTUAL_ENV=.venv uv pip install -r requirements.txt
+# Python 3.12 environment. Named .venv-mlx so it can sit beside main's
+# .venv — the two voice libraries can't share one (ADR-0010).
+uv venv --python 3.12 .venv-mlx
+uv pip install --python .venv-mlx/bin/python -r requirements.txt
 
 # Your API key
 cp .env.example .env                  # then paste your key into .env
-.venv/bin/python check_key.py         # verifies it works, without printing it
+.venv-mlx/bin/python check_key.py     # verifies it works, without printing it
 ```
 
 ### Record your reference voice
@@ -64,7 +70,7 @@ Aim for 15–20 seconds of continuous, natural speech in a quiet room without ec
 ### Run it
 
 ```bash
-.venv/bin/python server.py            # ~1 minute to load models, then open localhost:8000
+.venv-mlx/bin/python server.py        # ~15s to load (first run also downloads ~2.7GB), then open localhost:8000
 ```
 
 Tap the microphone, speak, tap **Stop and translate**.
@@ -77,22 +83,29 @@ still being generated.
 
 ## Performance
 
-Measured on an M3 MacBook Air.
+Measured on an M3 MacBook Air, the same three-sentence Russian recording
+through each voice model:
 
-**One sentence** — about 15 seconds end to end:
+| | First audio | All finished | Per sentence |
+|---|---|---|---|
+| Chatterbox (`main`) | 21.6s | 49.6s | ~12s |
+| **Qwen3-TTS on MLX** (this branch) | **9.9s** | **17.8s** | **~4s** |
 
-| Stage | Time | Where |
-|---|---|---|
-| Speech → text | 1.4s | local (CPU) |
-| Translate | 2.3s | Anthropic API |
-| Voice generation | 11.4s | local (Apple GPU) |
+Of that 9.9s, 2.3s is speech-to-text and 3.6s is translation (all three
+sentences at once), so voice generation is no longer the biggest wait.
+Qwen3-TTS generates speech about 1.4x faster than it plays; Chatterbox ran
+at about 0.5x.
 
-**Several sentences** — each one is translated and spoken separately, so
-playback starts long before the last one is finished:
+Russian word accuracy is roughly the same: transcribing the generated
+speech back with a multilingual Whisper, 6% of words weren't heard as
+intended with Qwen3-TTS, against 5% with Chatterbox.
+
+The figures below were measured on `main`, with Chatterbox. They explain
+why speech is split into sentences at all.
 
 | | First audio | All finished |
 |---|---|---|
-| one long clip (the old way) | 89.6s | 89.6s |
+| one long clip | 89.6s | 89.6s |
 | sentence at a time | **21.6s** | 49.6s |
 
 Chunking is 4.3x faster to first sound here, and 1.8x faster overall —
@@ -106,9 +119,9 @@ faster. A two-sentence recording measured closer to 2x, and one short
 sentence gains nothing at all, because the first sentence still takes its
 full ~12s to generate either way.
 
-Voice generation is the bottleneck and it can't be parallelised: one
-Chatterbox model on one GPU deadlocks if called from several threads, so
-sentences queue. Translations do run concurrently, since they're just
+Voice generation is never parallelised: one Chatterbox model on one GPU
+deadlocked when called from several threads, so sentences queue. Qwen3-TTS
+keeps the same queue; it hasn't been tested in parallel. Translations do run concurrently, since they're just
 network calls.
 
 Recordings are capped at 30 seconds, and speech with no full stop is
@@ -148,33 +161,28 @@ current translation to a folder you pick, for taking elsewhere.
 - **Not real-time.** Tap, speak, tap, wait. Sentences arrive one at a time rather than all at the end, but simultaneous interpretation is a substantially harder problem.
 - **Your accent is the model's, not yours.** Cross-lingual cloning transfers vocal timbre convincingly, but prosody comes from the model. It sounds recognisably like you speaking with a slight accent.
 - **English input only.** `small.en` is English-only; switch `WHISPER_MODEL` in `pipeline.py` to `large-v3-turbo` for multilingual input at roughly 8× the transcription cost.
-- **Russian stress marks are missing.** Chatterbox wants an optional `russian_text_stresser` package that isn't on PyPI, so stress placement is guessed. Occasionally audible — *кофе* can drift toward *кафе*.
+- **Nine languages, not 22.** See below.
+- **Occasional nonsense.** In testing, one clip in eighteen slid into English-sounding syllables halfway through a Russian sentence. Streaming generation, which echo uses, didn't do it in that sample, but the sample was small.
 - **Saving to a chosen folder needs Chrome or Edge.** It uses the File System Access API for a real save dialog; other browsers fall back to an ordinary download.
 
 ---
 
 ## Languages
 
-All 22 target languages the voice model supports are enabled:
+All nine target languages the voice model supports are enabled:
 
-> Arabic · Chinese · Danish · Dutch · Finnish · French · German · Greek · Hebrew · Hindi · Italian · Japanese · Korean · Malay · Norwegian · Polish · Portuguese · Russian · Spanish · Swahili · Swedish · Turkish
+> Chinese · French · German · Italian · Japanese · Korean · Portuguese · Russian · Spanish
 
-**The voice model is the constraint, not the translation.** Claude translates into far more languages than this; Chatterbox can only *speak* these 23 (the 22 above plus English, the source).
+**The voice model is the constraint, not the translation.** Claude translates into far more languages than this; Qwen3-TTS can only *speak* these nine plus English, the source.
 
-Spot-checked end to end by translating, generating, then transcribing the audio back — Polish, Hindi, Arabic and Swedish all round-tripped accurately, so non-Latin scripts and right-to-left text are fine.
+Compared with `main`, this branch drops Arabic, Danish, Dutch, Finnish, Greek, Hebrew, Hindi, Malay, Norwegian, Polish, Swahili, Swedish and Turkish. Use `main` for those.
 
-To change the list, edit `LANGUAGES` in `pipeline.py` — one line each. The key is the code Chatterbox knows, the value is the name Claude translates into:
+To change the list, edit `LANGUAGES` in `pipeline.py`. The key is a short code used in URLs and filenames; the value is the name Claude translates into, and lowercased, the name the voice model expects. The server checks every entry against the model at startup and refuses to start if one isn't supported.
 
 ```python
 LANGUAGES = {
-    "pl": "Polish",
+    "ru": "Russian",
 }
-```
-
-To see every code the installed model accepts:
-
-```bash
-.venv/bin/python -c "from chatterbox.mtl_tts import SUPPORTED_LANGUAGES; print(SUPPORTED_LANGUAGES)"
 ```
 
 ---
@@ -187,10 +195,11 @@ server.py        FastAPI. Streams a JSON event per sentence as each finishes.
 index.html       The interface — one file, no build step.
 history/         Saved clips (gitignored — your voice, your transcripts).
 check_key.py     Verifies your API key without printing it.
-smoke_test.py    Proves voice cloning works before you build on it.
 chunk_test.py    Shows how a recording splits into sentences.
 test_buffer.py   Unit tests for sentence chunking — no models, runs instantly.
-bench_streaming.py  Measures chunked vs one-clip generation.
+bench_streaming.py  Measures chunked vs one-clip generation (either engine).
+smoke_test.py    Chatterbox only — run with main's .venv.
+bench.py         Chatterbox only — run with main's .venv.
 *.dc.html        Design source for the seven interface states.
 canvas.json      Layout for those design artboards.
 ```
@@ -213,6 +222,8 @@ All fixed here, but they're the kind that recur:
 
 **Not every WAV is integer PCM.** The voice model writes 32-bit *float* WAVs (format tag 3). Python's `wave` module refuses those outright ("unknown format: 3"), and a joiner that hardcodes tag 1 in its output header produces a file whose header contradicts its contents — which plays as noise. Both joiners now read the tag from the source. Synthetic 16-bit test files hide this completely.
 
+**A library can hide its own missing parts.** The watermark library imports six packages it never declares, and when one is missing it reports `'NoneType' object is not callable` instead of the real error. It happened twice, a month apart: first `pkg_resources`, then `librosa`. Every one is now pinned by hand in `requirements.txt`, and the watermark is checked with its own detector rather than trusted because nothing crashed.
+
 **Sentence boundaries don't come from silence.** Neither VAD pauses nor Whisper's own segment timestamps line up with sentences — both split mid-sentence. The transcript's punctuation is the only reliable boundary, so text is buffered until it ends in `.`, `?` or `!`.
 
 ---
@@ -223,7 +234,7 @@ All fixed here, but they're the kind that recur:
 
 Two things are worth knowing if you build on this:
 
-**Everything generated here is watermarked.** Chatterbox applies Resemble AI's [Perth](https://github.com/resemble-ai/perth) imperceptible watermark to every clip before returning it. Audio produced by this tool can be identified as synthetic. Don't remove it.
+**Everything generated here is watermarked.** echo applies Resemble AI's [Perth](https://github.com/resemble-ai/perth) imperceptible watermark to every clip. Chatterbox did this internally; Qwen3-TTS doesn't, so echo does it itself, and it has been verified with Perth's own detector. Audio produced by this tool can be identified as synthetic. Don't remove it.
 
 **Your reference recording is personal data.** It stays on your machine — `.gitignore` excludes every audio format for exactly this reason — and it never leaves it, since the voice cloning runs locally. Only the translated *text* is sent anywhere.
 
@@ -233,4 +244,4 @@ Two things are worth knowing if you build on this:
 
 Prototype code — do what you like with it.
 
-Built on [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT, Resemble AI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), and the [Anthropic API](https://docs.anthropic.com).
+Built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache-2.0, Alibaba Qwen), [mlx-audio](https://github.com/Blaizzy/mlx-audio) (MIT), [Perth](https://github.com/resemble-ai/perth) (MIT, Resemble AI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), and the [Anthropic API](https://docs.anthropic.com). The `main` branch uses [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT, Resemble AI).

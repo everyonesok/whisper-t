@@ -4,29 +4,33 @@ The complete translate-in-your-voice pipeline, in one place.
 Three stages:
     1. Speech  -> English text     (faster-whisper, local)
     2. English -> target language  (Claude, via the API)
-    3. Text    -> your voice       (Chatterbox, local)
+    3. Text    -> your voice       (Qwen3-TTS via Apple's MLX, local)
 
 The models are loaded ONCE when you create a VoiceTranslator, then reused for
-every request. That matters: loading takes ~50 seconds, generating takes ~10.
-A web server creates one of these at startup and keeps it alive.
+every request. Loading takes a few seconds once downloaded; generating a
+sentence takes about two. A web server creates one of these at startup and
+keeps it alive.
+
+This branch runs Qwen3-TTS instead of Chatterbox — see ADR-0010. It needs
+its own environment, .venv-mlx, because the two voice libraries require
+incompatible versions of `transformers`.
 
 Run directly to test the whole thing on a file:
-    .venv/bin/python pipeline.py reference.wav ru
+    .venv-mlx/bin/python pipeline.py reference.wav ru
 """
 
-import os
 import re
 import sys
 import time
+from pathlib import Path
 
-os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
-
-import torch
-import torchaudio as ta
 import anthropic
+import numpy as np
+import perth
+import soundfile as sf
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from mlx_audio.tts.utils import load_model
 
 load_dotenv()
 
@@ -42,36 +46,35 @@ load_dotenv()
 # a language other than English, since the ".en" models are English-only.
 WHISPER_MODEL = "small.en"
 
+# The voice model: Qwen3-TTS, "Base" variant (the one that can clone a voice;
+# "CustomVoice" only has preset speakers), 1.7B parameters, weights stored at
+# 6-bit precision. Measured on an M3: first sound after ~0.55s, 1.4x faster
+# than realtime while streaming. The 0.6B version is faster (1.9x) but made
+# more word errors in Russian. Apache-2.0, code and weights. ~2.7 GB download,
+# fetched automatically on first run.
+VOICE_MODEL = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-6bit"
+
 # Every language the voice model can speak, minus English (the source).
 #
-# Two things have to agree for a language to work: the KEY must be a code
-# Chatterbox knows (import SUPPORTED_LANGUAGES from chatterbox.mtl_tts to
-# see them all), and the VALUE is the plain name Claude translates into.
-# Adding a language really is one line — the constraint is the voice model,
-# not the translation, since Claude handles far more languages than this.
+# The KEY is a short code used in URLs and history filenames. The VALUE does
+# double duty: it's the name Claude translates into, and lowercased it's the
+# language name Qwen3-TTS expects ("Russian" -> "russian"). Startup checks
+# every one against the model, so a typo fails loudly instead of mid-sentence.
+#
+# Nine, down from Chatterbox's 22. Qwen3-TTS speaks ten languages including
+# English. Lost in the switch: Arabic, Danish, Dutch, Finnish, Greek, Hebrew,
+# Hindi, Malay, Norwegian, Polish, Swahili, Swedish and Turkish. They're still
+# available on the main branch.
 LANGUAGES = {
-    "ar": "Arabic",
     "zh": "Chinese",
-    "da": "Danish",
-    "nl": "Dutch",
-    "fi": "Finnish",
     "fr": "French",
     "de": "German",
-    "el": "Greek",
-    "he": "Hebrew",
-    "hi": "Hindi",
     "it": "Italian",
     "ja": "Japanese",
     "ko": "Korean",
-    "ms": "Malay",
-    "no": "Norwegian",
-    "pl": "Polish",
     "pt": "Portuguese",
     "ru": "Russian",
     "es": "Spanish",
-    "sw": "Swahili",
-    "sv": "Swedish",
-    "tr": "Turkish",
 }
 
 TRANSLATION_SYSTEM = """You translate transcribed speech into {language}.
@@ -104,9 +107,10 @@ Output ONLY the {language} translation. No explanation, no quotes, no preamble."
 # which Whisper transcribes reliably.
 
 # Words we'll let accumulate without a sentence ending before forcing a
-# break. Generation runs about 2.5x the audio length, and ~25 words is
-# roughly 8 seconds of speech, so a chunk this size takes ~20s to speak.
-# That's the longest single wait worth accepting.
+# break. ~25 words is roughly 8 seconds of speech. These limits were set
+# when generation ran at 2.5x the audio length (Chatterbox) and a long
+# chunk meant a 20-second wait; Qwen3-TTS makes that ~6 seconds, so they
+# could now be relaxed. Left as-is to change one thing at a time.
 CHUNK_SOFT_LIMIT_WORDS = 25
 
 # Absolute ceiling, for speech with no sentence ending AND no comma.
@@ -216,26 +220,88 @@ class SentenceBuffer:
 class VoiceTranslator:
     def __init__(self, reference_voice="reference.wav"):
         self.reference_voice = reference_voice
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
 
-        print(f"Loading models (device={self.device})...", flush=True)
+        print("Loading models (voice on Apple GPU via MLX)...", flush=True)
         t0 = time.time()
 
         # faster-whisper has no Apple GPU support, so it runs on CPU. It's the
         # quickest stage regardless, so this costs us very little.
         self.whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        self.tts = ChatterboxMultilingualTTS.from_pretrained(device=self.device)
+        self.tts = load_model(VOICE_MODEL)
         self.claude = anthropic.Anthropic()
+
+        # Chatterbox watermarked everything it generated, and the README
+        # promises that. Qwen3-TTS doesn't, so we apply the same inaudible
+        # Perth watermark ourselves. (Perth is Resemble AI's library, MIT,
+        # separate from Chatterbox. It imports librosa, torch and others
+        # without declaring them — see requirements.txt.)
+        self.watermarker = perth.PerthImplicitWatermarker()
 
         print(f"Models loaded in {time.time()-t0:.1f}s", flush=True)
 
-        # The very first generation is ~4x slower than the rest while the GPU
-        # warms up. Burn that cost here at startup so the first real request
-        # a user makes is fast, rather than making them wait 45 seconds.
+        # Fail at startup, not mid-translation, if a language in the list
+        # isn't one this model actually speaks.
+        supported = set(self.tts.get_supported_languages())
+        missing = [name for name in LANGUAGES.values() if name.lower() not in supported]
+        if missing:
+            raise RuntimeError(f"Voice model doesn't support: {missing}")
+
+        self.reference_text = self._reference_transcript()
+
+        # The first generation compiles GPU kernels and is several times
+        # slower. Burn that cost here so the first real request is fast.
         print("Warming up...", flush=True)
         t0 = time.time()
-        self.tts.generate("Привет.", language_id="ru", audio_prompt_path=self.reference_voice)
+        self._generate("Привет.", "ru")
         print(f"Warmed up in {time.time()-t0:.1f}s — ready.\n", flush=True)
+
+    def _reference_transcript(self):
+        """
+        Qwen3-TTS clones from the reference audio AND a transcript of it.
+        Transcribe it once with Whisper and keep it next to the audio.
+
+        Regenerated whenever reference.wav is newer than the transcript —
+        otherwise re-recording your voice would silently keep the OLD
+        words, and cloning would be quietly worse with no error.
+
+        reference.txt is your own speech as text, so it's gitignored
+        alongside the audio.
+        """
+        wav = Path(self.reference_voice)
+        txt = wav.with_suffix(".txt")
+        if txt.exists() and txt.stat().st_mtime >= wav.stat().st_mtime:
+            return txt.read_text().strip()
+
+        print("Transcribing reference voice (once)...", flush=True)
+        text, _ = self.transcribe(str(wav))
+        if not text:
+            raise RuntimeError(f"Couldn't hear any speech in {wav}")
+        txt.write_text(text)
+        return text
+
+    def _generate(self, text, lang_code):
+        """
+        Run Qwen3-TTS and return (samples, sample_rate), watermarked.
+
+        stream=True even though the pieces are joined here: in mlx-audio
+        streaming measured about twice as fast as whole-clip generation
+        for the same sentence (1.4x vs 0.8x realtime).
+        """
+        pieces, sample_rate = [], None
+        for result in self.tts.generate(
+            text=text,
+            ref_audio=self.reference_voice,
+            ref_text=self.reference_text,
+            lang_code=LANGUAGES[lang_code].lower(),
+            stream=True,
+            streaming_interval=0.32,
+        ):
+            pieces.append(np.array(result.audio, dtype=np.float32))
+            sample_rate = result.sample_rate
+
+        audio = np.concatenate(pieces)
+        audio = self.watermarker.apply_watermark(audio, sample_rate=sample_rate)
+        return audio.astype(np.float32), sample_rate
 
     def transcribe(self, audio_path):
         """Stage 1: spoken audio -> written text."""
@@ -321,12 +387,10 @@ class VoiceTranslator:
 
     def speak(self, text, lang_code, out_path="output.wav"):
         """Stage 3: translated text -> audio in the reference voice."""
-        wav = self.tts.generate(
-            text,
-            language_id=lang_code,
-            audio_prompt_path=self.reference_voice,
-        )
-        ta.save(out_path, wav, self.tts.sr)
+        audio, sample_rate = self._generate(text, lang_code)
+        # 32-bit float WAV, the same format Chatterbox wrote, so the history
+        # joiner and the browser's WAV reader see nothing different.
+        sf.write(out_path, audio, sample_rate, subtype="FLOAT")
         return out_path
 
     def run(self, audio_path, lang_code, out_path="output.wav"):

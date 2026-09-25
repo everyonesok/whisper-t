@@ -40,7 +40,7 @@ whole mechanism.
 
 | # | Decision | Status |
 |---|---|---|
-| [0001](0001-chatterbox-multilingual-for-voice-cloning.md) | Chatterbox Multilingual for voice cloning | Accepted |
+| [0001](0001-chatterbox-multilingual-for-voice-cloning.md) | Chatterbox Multilingual for voice cloning | Superseded by 0010 |
 | [0002](0002-small-en-for-speech-recognition.md) | `small.en` for speech recognition | Accepted |
 | [0003](0003-punctuation-not-silence-for-sentence-boundaries.md) | Punctuation, not silence, for sentence boundaries | Accepted |
 | [0004](0004-ndjson-streaming-over-websockets.md) | NDJSON streaming over WebSockets | Accepted |
@@ -49,3 +49,4 @@ whole mechanism.
 | [0007](0007-server-side-clip-history.md) | Server-side clip history | Accepted |
 | [0008](0008-pin-setuptools-below-81.md) | Pin setuptools below 81 | Accepted |
 | [0009](0009-crossfade-sentence-chunks.md) | Crossfade sentence chunks when joining | Accepted |
+| [0010](0010-qwen3-tts-on-mlx-for-voice-cloning.md) | Qwen3-TTS on MLX for voice cloning | Accepted |

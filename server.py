@@ -6,10 +6,11 @@ It does three jobs:
   2. Loads the AI models ONCE at startup and keeps them in memory
   3. Runs the pipeline when the browser sends a recording
 
-Start it with:  .venv/bin/python server.py
+Start it with:  .venv-mlx/bin/python server.py
 Then open:      http://localhost:8000
 
-Startup takes about a minute — it loads two models and warms up the GPU.
+Startup takes 10-20 seconds — it loads two models and warms up the GPU.
+The very first run also downloads the voice model (~2.7 GB).
 Wait for "ready" before opening the page.
 """
 
@@ -33,7 +34,7 @@ from pipeline import VoiceTranslator, LANGUAGES
 
 HERE = Path(__file__).parent
 
-# One translator for the whole server. Loading costs ~50 seconds, so it
+# One translator for the whole server. Loading costs 10-20 seconds, so it
 # happens once at startup rather than per request.
 translator: VoiceTranslator | None = None
 

@@ -17,8 +17,13 @@ history/
 *.caf
 *.webm
 
+# The transcript of your reference recording (Qwen3-TTS needs one). It's
+# your own words as text, so the audio rules above wouldn't catch it.
+reference.txt
+
 # ── Python ────────────────────────────────────────────────
 .venv/
+.venv-mlx/
 __pycache__/
 *.pyc
 

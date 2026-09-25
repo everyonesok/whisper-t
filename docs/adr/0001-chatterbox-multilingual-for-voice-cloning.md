@@ -1,6 +1,6 @@
 # ADR-0001: Chatterbox Multilingual for voice cloning
 
-**Status:** Accepted
+**Status:** Accepted — **Superseded by:** ADR-0010 (on the `qwen-streaming` branch)
 **Date:** 2026-09-06
 
 ## Context
