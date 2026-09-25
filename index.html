@@ -672,6 +672,9 @@ document.addEventListener("keydown", e => {
 // ─────────────────────────────────────────────────────────────
 const ICON_DONE    = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.35"/><polyline points="8 12.5 11 15.5 16.5 9"/></svg>`;
 const ICON_ACTIVE  = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg>`;
+// Play / pause buttons, shared by the result screen and the library.
+const ICON_PLAY  = `<svg width="12" height="12" viewBox="0 0 24 24" style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg>`;
+const ICON_PAUSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
 const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--line2)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/></svg>`;
 
 let heardText = "", translatedText = "", stageTimes = {};
@@ -681,7 +684,9 @@ let heardText = "", translatedText = "", stageTimes = {};
 // slow sentence never blocks a later one from being stored.
 let sentences = [];
 let playCursor = 1;        // 1-based index of the sentence we want to play next
-let isPlaying = false;
+let isPlaying = false;     // a sentence is loaded as "current" -- stays true while paused,
+                           // which is what stops the queue advancing during a pause
+let currentIndex = null;   // which sentence that is
 let expectedChunks = 0;
 
 async function onRecordingStopped() {
@@ -698,7 +703,7 @@ async function onRecordingStopped() {
   }
 
   heardText = ""; translatedText = ""; stageTimes = {};
-  sentences = []; playCursor = 1; isPlaying = false; expectedChunks = 0; genTimes = []; savedId = null;
+  sentences = []; playCursor = 1; isPlaying = false; currentIndex = null; expectedChunks = 0; genTimes = []; savedId = null;
   $("sentenceList").innerHTML = "";
   $("timings").innerHTML = "";
 
@@ -841,17 +846,17 @@ function addSentence(ev) {
 
   row.className = "srow";
   row.innerHTML = `
-    <div class="sicon" id="sicon-${ev.index}">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)"
-        style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg></div>
+    <div class="sicon" id="sicon-${ev.index}" title="Play">${ICON_PLAY}</div>
     <div style="flex-grow:1">
       <div class="ssrc">${escapeHtml(ev.source)}</div>
       <div class="stxt">${escapeHtml(ev.text)}</div>
     </div>
     <span class="mono" style="font-size:10.5px;color:var(--faint);flex-shrink:0">${ev.seconds}s</span>`;
 
-  // Clicking a row replays just that sentence.
+  // The sentence that's playing: its button pauses and resumes it.
+  // Any other sentence: jump there and carry on in order from it.
   $(`sicon-${ev.index}`).onclick = () => {
+    if (currentIndex === ev.index) { togglePause(); return; }
     stopPlayback();
     playCursor = ev.index;
     tryPlayNext();
@@ -889,27 +894,19 @@ function tryPlayNext() {
   if (!s) return;
 
   isPlaying = true;
+  currentIndex = s.index;
   const row = $(`srow-${s.index}`);
-  if (row) {
-    row.classList.add("playing");
-    // An explicit label, because a border tint alone is easy to miss while
-    // you're listening rather than watching.
-    const src = row.querySelector(".ssrc");
-    if (src && !src.dataset.orig) src.dataset.orig = src.textContent;
-    if (src) src.innerHTML =
-      `<span class="nowplaying">▸ PLAYING NOW</span> &nbsp;${escapeHtml(src.dataset.orig)}`;
-  }
+  if (row) row.classList.add("playing");
+  setSentenceState(s.index, "playing");
   status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
 
   s.audio.currentTime = 0;
   s.audio.play().catch(() => {});
   s.audio.onended = () => {
     isPlaying = false;
-    if (row) {
-      row.classList.remove("playing");
-      const src = row.querySelector(".ssrc");
-      if (src && src.dataset.orig) src.textContent = src.dataset.orig;
-    }
+    currentIndex = null;
+    if (row) row.classList.remove("playing");
+    setSentenceState(s.index, null);
     playCursor++;
     // If the next sentence hasn't arrived, say so rather than falling silent
     // with no explanation.
@@ -920,10 +917,51 @@ function tryPlayNext() {
   };
 }
 
+// One place that sets a sentence row's button and label:
+//   "playing" -> pause button, "PLAYING NOW" label
+//   "paused"  -> play button,  "PAUSED" label
+//   null      -> play button,  no label
+// (An explicit label, because a highlight alone is easy to miss while
+// you're listening rather than watching.)
+function setSentenceState(index, state) {
+  const btn = $(`sicon-${index}`);
+  if (btn) {
+    btn.innerHTML = state === "playing" ? ICON_PAUSE : ICON_PLAY;
+    btn.title = state === "playing" ? "Pause" : "Play";
+  }
+  const src = $(`srow-${index}`)?.querySelector(".ssrc");
+  if (!src) return;
+  if (!src.dataset.orig) src.dataset.orig = src.textContent;
+  src.innerHTML = state
+    ? `<span class="nowplaying">▸ ${state === "playing" ? "PLAYING NOW" : "PAUSED"}</span> &nbsp;${escapeHtml(src.dataset.orig)}`
+    : escapeHtml(src.dataset.orig);
+}
+
+// Pause or resume the current sentence. isPlaying stays true throughout,
+// so tryPlayNext() won't start the next sentence while this one is paused
+// -- not even one that finishes generating during the pause.
+function togglePause() {
+  const s = currentIndex && sentences[currentIndex - 1];
+  if (!s) return;
+  if (s.audio.paused) {
+    s.audio.play().catch(() => {});
+    setSentenceState(s.index, "playing");
+    status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
+  } else {
+    s.audio.pause();
+    setSentenceState(s.index, "paused");
+    status("paused", "var(--amber)");
+  }
+}
+
 function stopPlayback() {
   sentences.forEach(s => { if (s) { s.audio.pause(); s.audio.onended = null; } });
   document.querySelectorAll(".srow.playing").forEach(r => r.classList.remove("playing"));
+  // Reset the interrupted row's button and label too. (Before, a replay
+  // mid-sentence left a stale "PLAYING NOW" behind.)
+  if (currentIndex) setSentenceState(currentIndex, null);
   isPlaying = false;
+  currentIndex = null;
 }
 
 function renderTimings(total) {
@@ -1111,8 +1149,6 @@ $("saveBtn").addEventListener("click", async () => {
 let histAudio = null;
 let histPlayingId = null;      // which clip histAudio belongs to
 
-const ICON_PLAY  = `<svg width="12" height="12" viewBox="0 0 24 24" style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg>`;
-const ICON_PAUSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
 
 // Swap one library row's button between play and pause.
 function setHistIcon(id, playing) {
