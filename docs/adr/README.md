@@ -50,3 +50,4 @@ whole mechanism.
 | [0008](0008-pin-setuptools-below-81.md) | Pin setuptools below 81 | Accepted |
 | [0009](0009-crossfade-sentence-chunks.md) | Crossfade sentence chunks when joining | Accepted |
 | [0010](0010-qwen3-tts-on-mlx-for-voice-cloning.md) | Qwen3-TTS on MLX for voice cloning | Accepted |
+| [0011](0011-gradient-visual-language-and-system-type.md) | Gradient visual language and system type | Accepted |

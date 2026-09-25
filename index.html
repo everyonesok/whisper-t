@@ -4,50 +4,147 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>echo</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
+  /* ── Visual language ────────────────────────────────────────────
+     A blurred colour field behind everything, thin white hairlines
+     framing the app, big tight Helvetica, black pill buttons, and
+     off-white cards wherever there's text to read. One accent: a
+     lime-to-pink gradient, used sparingly for "this is live".
+
+     Two token scopes. On the gradient, text is white. Inside a
+     .card (and the sentence/history rows), the same token names are
+     redefined for dark-on-light — so colours set from JavaScript
+     with var(--muted) etc. come out right wherever they land.
+
+     No web fonts: Helvetica Neue ships with macOS, so the page makes
+     no requests to a font service. */
   :root {
-    --bg:      oklch(0.17 0.008 75);
-    --panel:   oklch(0.20 0.009 75);
-    --raised:  oklch(0.22 0.010 75);
-    --line:    oklch(0.26 0.010 75);
-    --line2:   oklch(0.30 0.012 75);
-    --text:    oklch(0.94 0.012 85);
-    --muted:   oklch(0.66 0.014 85);
-    --faint:   oklch(0.56 0.012 85);
-    --accent:  oklch(0.70 0.15 55);
-    --green:   oklch(0.70 0.15 155);
-    --red:     oklch(0.65 0.18 25);
-    --amber:   oklch(0.72 0.13 90);
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: 'Space Grotesk', system-ui, sans-serif;
-    display: flex; align-items: center; justify-content: center;
-    min-height: 100vh; padding: 20px;
-  }
-  .app {
-    width: 560px; height: 780px; max-height: calc(100vh - 40px);
-    background: var(--bg); border: 1px solid var(--line);
-    border-radius: 14px; overflow: hidden;
-    display: flex; flex-direction: column;
-    box-shadow: 0 30px 70px -30px oklch(0.05 0.004 75);
+    --ink:     #121212;
+    --paper:   oklch(0.965 0.006 95);
+    --hair:    rgba(255, 255, 255, 0.55);   /* frame lines on the gradient */
+    --track:   rgba(255, 255, 255, 0.28);   /* empty meter segments */
+
+    --lime:    oklch(0.90 0.19 118);
+    --peach:   oklch(0.80 0.11 55);
+    --accent:  oklch(0.64 0.24 350);        /* pink end of the gradient */
+    --live:    linear-gradient(90deg, var(--lime), var(--peach) 50%, var(--accent));
+
+    --green:   oklch(0.60 0.15 155);
+    --red:     oklch(0.60 0.21 25);
+    --amber:   oklch(0.74 0.15 75);
+
+    /* on-gradient text */
+    --text:    #ffffff;
+    --muted:   rgba(255, 255, 255, 0.84);
+    --faint:   rgba(255, 255, 255, 0.70);
+    --bg:      var(--ink);                  /* legacy name: used as "contrast colour" */
+    --line:    var(--hair);
+    --line2:   var(--hair);
+    --raised:  rgba(255, 255, 255, 0.14);
+    --panel:   rgba(255, 255, 255, 0.10);
+
+    --sans: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
   }
 
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+  /* Dark-on-light scope for everything read at length. */
+  .card, .srow {
+    --text:   var(--ink);
+    --muted:  oklch(0.40 0.008 95);
+    --faint:  oklch(0.50 0.008 95);
+    --line:   oklch(0.88 0.006 95);
+    --line2:  oklch(0.84 0.006 95);
+    --raised: oklch(0.93 0.006 95);
+    --panel:  #ffffff;
+    color: var(--text);
+    background: var(--paper);
   }
-  .brand { display: flex; align-items: center; gap: 7px; }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-  .brand span { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    font-family: var(--sans); color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    background: oklch(0.46 0.045 290);
+    overflow: hidden;
+  }
+
+  /* The colour field: soft blobs on a slow drift. Oversized so the
+     drift never shows an edge. */
+  body::before {
+    content: ""; position: fixed; inset: -20%; z-index: -2;
+    background:
+      radial-gradient(38% 42% at 22% 24%, oklch(0.40 0.07 262) 0%, transparent 70%),
+      radial-gradient(34% 40% at 78% 22%, oklch(0.63 0.05 232) 0%, transparent 72%),
+      radial-gradient(40% 38% at 40% 72%, oklch(0.76 0.075 48) 0%, transparent 70%),
+      radial-gradient(34% 36% at 84% 80%, oklch(0.54 0.09 340) 0%, transparent 70%),
+      radial-gradient(30% 30% at 58% 48%, oklch(0.70 0.04 20) 0%, transparent 70%);
+    filter: blur(28px);
+    animation: drift 38s ease-in-out infinite alternate;
+  }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    50%  { transform: translate(-3%, 2%) scale(1.05); }
+    100% { transform: translate(2%, -2%) scale(1.02); }
+  }
+  @media (prefers-reduced-motion: reduce) { body::before { animation: none; } }
+
+  /* Film grain over everything, so the blur reads as photographic
+     rather than as a flat CSS gradient. */
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    opacity: 0.22; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ── The frame ───────────────────────────────────────────────── */
+  .app {
+    position: relative;
+    width: 560px; height: 780px; max-height: calc(100vh - 40px);
+    border: 1px solid var(--hair);
+    display: flex; flex-direction: column;
+    background: rgba(255, 255, 255, 0.03);
+  }
+  /* Small dots where hairlines meet. */
+  .node {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: #fff; transform: translate(-50%, -50%); z-index: 2;
+  }
+
+  header, footer {
+    display: grid; grid-template-columns: 1fr 1fr; flex-shrink: 0;
+    font-size: 13px;
+  }
+  header { border-bottom: 1px solid var(--hair); }
+  footer { border-top: 1px solid var(--hair); font-size: 11.5px; color: var(--faint); }
+  header > div, footer > div {
+    display: flex; align-items: center; gap: 9px; padding: 14px 20px;
+  }
+  header > div + div, footer > div + div {
+    border-left: 1px solid var(--hair); justify-content: flex-end;
+  }
+
+  .brand span { font-size: 19px; font-weight: 500; letter-spacing: -0.03em; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .brand .dot { background: var(--live); width: 18px; height: 7px; border-radius: 4px; }
+
+  .pill {
+    display: flex; align-items: center; gap: 7px; padding: 7px 13px;
+    border: 1px solid var(--hair); border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08); color: var(--text);
+    font-family: inherit; font-size: 13px; cursor: pointer;
+  }
+  .pill:hover { background: rgba(255, 255, 255, 0.18); }
   select {
-    font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
-    background: var(--raised); border: 1px solid var(--line2);
-    border-radius: 7px; padding: 7px 11px; cursor: pointer;
+    appearance: none; -webkit-appearance: none;
+    font-family: inherit; font-size: 13px; font-weight: 500; color: var(--ink);
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23121212' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 12px center;
+    border: none; border-radius: 999px; padding: 8px 30px 8px 14px; cursor: pointer;
   }
-  select:disabled { opacity: 0.45; cursor: default; }
+  select:disabled { opacity: 0.5; cursor: default; }
 
   main { flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; }
   .screen {
@@ -55,118 +152,130 @@
     padding: 30px; overflow-y: auto;
   }
   .screen.center { align-items: center; justify-content: center; }
+  .status { display: flex; align-items: center; gap: 8px; }
 
-  footer {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 13px 24px; border-top: 1px solid var(--line);
-    background: oklch(0.155 0.008 75); flex-shrink: 0;
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
-    font-size: 11.5px; color: var(--faint);
-  }
-  .status { display: flex; align-items: center; gap: 7px; }
+  /* ── Type ────────────────────────────────────────────────────── */
+  .display { font-size: 40px; font-weight: 500; letter-spacing: -0.045em; line-height: 0.98; }
+  .title   { font-size: 26px; font-weight: 500; letter-spacing: -0.035em; line-height: 1.05; }
+  .label   { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .mono    { font-variant-numeric: tabular-nums; }
 
-  /* ---- mic button ---- */
+  /* ── Cards ───────────────────────────────────────────────────── */
+  .card { border-radius: 4px; padding: 16px 18px; }
+
+  /* ── Mic ─────────────────────────────────────────────────────── */
   .mic {
     width: 168px; height: 168px; border-radius: 50%;
-    background: var(--raised); border: 1px solid oklch(0.32 0.014 75);
+    background: var(--ink);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; user-select: none; -webkit-user-select: none;
-    box-shadow: inset 0 1px 0 oklch(0.38 0.014 75), 0 18px 40px -18px oklch(0.10 0.006 75);
-    transition: transform 0.12s ease, border-color 0.12s ease;
-    touch-action: none;
+    box-shadow: 0 24px 50px -22px rgba(0, 0, 0, 0.55);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    touch-action: none; position: relative;
   }
-  .mic:hover { border-color: var(--accent); }
+  /* A thin gradient ring appears on hover: the one "live" colour. */
+  .mic::after {
+    content: ""; position: absolute; inset: -7px; border-radius: 50%;
+    padding: 2px; background: var(--live);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .mic:hover::after { opacity: 1; }
   .mic:active { transform: scale(0.96); }
 
-  .hint {
-    display: flex; gap: 12px; padding: 14px 16px; max-width: 380px;
-    border: 1px solid oklch(0.28 0.012 75); border-radius: 9px;
-    background: oklch(0.195 0.009 75);
-  }
+  .hint { display: flex; gap: 12px; max-width: 380px; }
 
-  /* ---- recording ---- */
+  /* ── Recording ───────────────────────────────────────────────── */
   .bars { display: flex; align-items: center; gap: 5px; height: 76px; }
   .bars i {
-    width: 4px; height: 8px; border-radius: 2px; background: var(--accent);
+    width: 4px; height: 8px; border-radius: 2px; background: #fff;
     transition: height 0.07s linear;
   }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
   .rec-dot { animation: pulse 1.4s ease-in-out infinite; }
-  .timer { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 34px; }
-  .meter { display: flex; gap: 3px; height: 7px; }
-  .meter div { border-radius: 2px; background: var(--line2); transition: background 0.2s; }
+  .timer { font-size: 72px; font-weight: 500; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .meter { display: flex; gap: 3px; height: 4px; }
+  .meter div { border-radius: 2px; background: var(--track); transition: background 0.2s; }
 
-  /* ---- stages ---- */
+  /* ── Stages ──────────────────────────────────────────────────── */
   .stage { display: flex; gap: 15px; align-items: flex-start; }
-  .stage .icon { width: 19px; flex-shrink: 0; padding-top: 2px; }
-  .rail { width: 1.5px; height: 30px; background: var(--line2); margin: 3px auto 0; }
+  .stage .icon { width: 19px; flex-shrink: 0; padding-top: 1px; }
+  .rail { width: 1px; height: 30px; background: var(--line2); margin: 4px auto 0; }
   @keyframes spin { to { transform: rotate(360deg) } }
   .spin { animation: spin 1.1s linear infinite; transform-origin: 50% 50%; }
   @keyframes sweep { 0% { transform: translateX(-100%) } 100% { transform: translateX(320%) } }
   .sweep { animation: sweep 1.6s ease-in-out infinite; }
 
-  /* ---- buttons ---- */
+  /* ── Buttons ─────────────────────────────────────────────────── */
   .btn {
     display: flex; align-items: center; justify-content: center; gap: 9px;
-    padding: 14px 16px; border-radius: 9px; cursor: pointer; border: none;
-    font-family: inherit; font-size: 14.5px; font-weight: 500;
+    padding: 15px 22px; border-radius: 999px; cursor: pointer; border: none;
+    font-family: inherit; font-size: 14.5px; font-weight: 500; letter-spacing: -0.01em;
+    transition: transform 0.1s, background 0.15s;
   }
-  .btn-primary { background: var(--accent); color: var(--bg); flex-grow: 1; }
-  .btn-save {
-    background: oklch(0.24 0.022 55); border: 1px solid oklch(0.42 0.05 55);
-    color: oklch(0.86 0.05 55); font-size: 14px;
-  }
-  .btn-ghost {
-    background: var(--raised); border: 1px solid oklch(0.32 0.014 75); color: var(--text);
-  }
+  .btn-primary { background: var(--ink); color: #fff; flex-grow: 1; }
+  .btn-primary:hover { background: #000; }
+  .btn-save, .btn-ghost { background: #fff; color: var(--ink); }
+  .btn-save:hover, .btn-ghost:hover { background: var(--paper); }
   .btn:active { transform: scale(0.98); }
 
-  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
-  .label { font-family: 'IBM Plex Mono', ui-monospace, monospace;
-           font-size: 10.5px; letter-spacing: 0.08em; color: var(--faint); }
-  .linkish { font-size: 12px; color: var(--accent); cursor: pointer;
+  .linkish { font-size: 12.5px; color: var(--text); cursor: pointer;
              background: none; border: none; font-family: inherit;
-             border-bottom: 1px solid var(--accent); padding: 0 0 1px; }
+             border-bottom: 1px solid var(--hair); padding: 0 0 1px; }
 
-  /* ---- sentence rows (streaming results) ---- */
+  /* ── Sentence and history rows ───────────────────────────────── */
   .srow {
+    position: relative; overflow: hidden;
+    flex-shrink: 0;   /* in a scrolling list, scroll instead of squashing (and clipping) rows */
     display: flex; gap: 12px; align-items: flex-start;
-    padding: 12px 13px; border-radius: 9px;
-    border: 1px solid var(--line); background: oklch(0.195 0.009 75);
-    transition: border-color 0.2s, background 0.2s;
+    padding: 13px 15px; border-radius: 4px;
+    transition: background 0.2s, opacity 0.2s;
   }
-  .srow.playing {
-    border-color: var(--accent); background: oklch(0.245 0.030 55);
-    box-shadow: inset 3px 0 0 var(--accent);
+  /* The playing row gets the gradient strip down its left edge. */
+  .srow.playing { background: #fff; }
+  .srow.playing::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: linear-gradient(180deg, var(--lime), var(--peach), var(--accent));
   }
-  .srow.pending { opacity: 0.65; border-style: dashed; }
+  .srow.pending { opacity: 0.72; background: rgba(255, 255, 255, 0.55); }
   /* A soft pulse so a row that is still generating reads as active work
      rather than as a dead placeholder. */
-  @keyframes waiting { 0%,100% { opacity: 0.45 } 50% { opacity: 0.8 } }
+  @keyframes waiting { 0%,100% { opacity: 0.5 } 50% { opacity: 0.9 } }
   .srow.pending .ssrc { animation: waiting 1.8s ease-in-out infinite; }
-  .nowplaying {
-    font-size: 10px; letter-spacing: 0.08em; color: var(--accent);
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  }
+  .nowplaying { font-size: 10.5px; font-weight: 500; letter-spacing: 0.06em; color: var(--accent); }
   .srow .sicon {
-    width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%;
+    width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    background: var(--raised); border: 1px solid var(--line2);
-    cursor: pointer;
+    background: var(--ink); cursor: pointer;
   }
-  .srow.pending .sicon { cursor: default; }
-  .srow .ssrc { font-size: 11.5px; color: var(--faint); line-height: 1.45; }
-  .srow .stxt { font-size: 15px; line-height: 1.45; margin-top: 3px; }
-  [hidden] { display: none !important; }
+  .srow .sicon polygon { fill: #fff; }   /* play triangles; spinners stay hollow */
+  .srow.pending .sicon { cursor: default; background: var(--raised); }
+  .srow .ssrc { font-size: 12px; color: var(--faint); line-height: 1.45; }
+  .srow .ssrc > span { white-space: nowrap; }   /* keep "10d ago", "3 sentences" whole on narrow screens */
+  .srow .stxt { font-size: 16px; line-height: 1.4; letter-spacing: -0.01em; margin-top: 3px; }
+
+  /* ── Small screens: drop the frame, fill the viewport ────────── */
+  @media (max-width: 600px) {
+    body { padding: 0; }
+    .app { width: 100%; height: 100vh; max-height: none; border: none; }
+    .node { display: none; }
+    .display { font-size: 34px; }
+  }
 </style>
 </head>
 <body>
 
 <div class="app">
+  <!-- dots where the hairlines meet: four corners, and where the
+       header/footer dividers touch the frame -->
+  <i class="node" style="left:0;top:0"></i><i class="node" style="left:100%;top:0"></i>
+  <i class="node" style="left:0;top:100%"></i><i class="node" style="left:100%;top:100%"></i>
+  <i class="node" style="left:50%;top:0"></i><i class="node" style="left:50%;top:100%"></i>
   <header>
     <div class="brand"><span class="dot"></span><span>echo</span></div>
-    <div style="display:flex;align-items:center;gap:9px">
-      <button id="histBtn" title="Saved clips" style="display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line2);border-radius:7px;background:var(--raised);color:var(--text);font-family:inherit;font-size:13px;cursor:pointer">
+    <div>
+      <button id="histBtn" class="pill" title="Saved clips">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
         </svg>
@@ -182,17 +291,17 @@
     <section class="screen center" id="s-idle" style="gap:30px">
       <div style="display:flex;flex-direction:column;align-items:center;gap:22px">
         <div class="mic" id="micBtn">
-          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/>
           </svg>
         </div>
         <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
-          <div style="font-size:21px;font-weight:500">Tap to speak</div>
-          <div style="font-size:13px;color:var(--muted)">Tap again when you're done</div>
+          <div class="display">Tap to speak</div>
+          <div style="font-size:14px;color:var(--muted)">Tap again when you're done</div>
         </div>
       </div>
-      <div class="hint">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0;margin-top:1px">
+      <div class="hint card">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0;margin-top:1px">
           <circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/>
         </svg>
         <div style="display:flex;flex-direction:column;gap:4px">
@@ -206,25 +315,25 @@
     <section class="screen center" id="s-rec" hidden style="gap:32px;cursor:pointer">
       <div style="display:flex;align-items:center;gap:9px">
         <span class="rec-dot" style="width:9px;height:9px;border-radius:50%;background:var(--red)"></span>
-        <span class="mono" style="font-size:14px;font-weight:500;color:var(--red);letter-spacing:0.04em">RECORDING</span>
+        <span class="label" style="color:#fff;font-size:12px">Recording</span>
       </div>
       <div class="bars" id="bars"></div>
       <div class="timer" id="timer">0:00</div>
       <div style="width:100%;max-width:392px;display:flex;flex-direction:column;gap:11px">
         <div style="display:flex;align-items:baseline;justify-content:space-between">
-          <span id="lenLabel" style="font-size:13px;font-weight:500;color:var(--green)">Good length</span>
+          <span id="lenLabel" style="font-size:13px;font-weight:500;color:#fff">Good length</span>
           <span id="waitEst" class="mono" style="font-size:12px;color:var(--muted)">~15s wait</span>
         </div>
         <div class="meter">
           <div id="m1" style="flex-grow:4"></div><div id="m2" style="flex-grow:3"></div><div id="m3" style="flex-grow:3"></div>
         </div>
-        <div style="display:flex;justify-content:space-between" class="mono">
-          <span style="font-size:10.5px;color:var(--faint)">SHORT</span>
-          <span style="font-size:10.5px;color:var(--faint)">LONG</span>
-          <span style="font-size:10.5px;color:var(--faint)">VERY LONG</span>
+        <div style="display:flex;justify-content:space-between">
+          <span class="label">Short</span>
+          <span class="label">Long</span>
+          <span class="label">Very long</span>
         </div>
       </div>
-      <button class="btn" id="stopBtn" style="background:var(--raised);border:1px solid oklch(0.42 0.05 25);color:var(--text);flex-grow:0;padding:13px 22px">
+      <button class="btn btn-primary" id="stopBtn" style="flex-grow:0;padding:15px 26px">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
         Stop and translate
       </button>
@@ -233,10 +342,10 @@
     <!-- ============ PROCESSING ============ -->
     <section class="screen" id="s-proc" hidden style="justify-content:center;gap:30px;padding:30px 40px">
       <div style="display:flex;flex-direction:column;gap:6px">
-        <div style="font-size:20px;font-weight:500">Working on it</div>
-        <div style="font-size:13.5px;color:var(--muted)" id="procSub">Listening back to what you said</div>
+        <div class="title">Working on it</div>
+        <div style="font-size:14px;color:var(--muted)" id="procSub">Listening back to what you said</div>
       </div>
-      <div style="display:flex;flex-direction:column">
+      <div class="card" style="display:flex;flex-direction:column;padding:22px 22px 20px">
         <div class="stage" id="st-1">
           <div class="icon"><span id="ic-1"></span><div class="rail"></div></div>
           <div style="display:flex;flex-grow:1;justify-content:space-between;align-items:baseline;padding-bottom:22px">
@@ -262,7 +371,7 @@
           </div>
         </div>
       </div>
-      <div id="procHeard" hidden style="padding:13px 15px;border-left:2px solid var(--line2);background:oklch(0.195 0.009 75)">
+      <div id="procHeard" class="card" hidden style="padding:13px 16px">
         <div style="font-size:12.5px;line-height:1.55;color:var(--muted)" id="procHeardText"></div>
       </div>
     </section>
@@ -281,24 +390,24 @@
 
       <div style="display:flex;gap:3px" class="mono" id="timings"></div>
 
-      <div style="display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid var(--line2);border-radius:8px;background:oklch(0.195 0.009 75)">
+      <div class="card" style="display:flex;align-items:center;gap:8px;padding:10px 14px">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
-        <span class="mono" style="font-size:11px;color:var(--faint)">saves as</span>
-        <span class="mono" style="font-size:11px;color:var(--text)" id="filename"></span>
+        <span style="font-size:11.5px;color:var(--faint)">saves as</span>
+        <span style="font-size:11.5px;color:var(--text)" id="filename"></span>
       </div>
 
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" id="againBtn">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
           Say something else
         </button>
         <button class="btn btn-save" id="replayAllBtn" title="Play all again">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.78 0.13 55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg>
         </button>
         <button class="btn btn-save" id="saveBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="oklch(0.78 0.13 55)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Save
         </button>
       </div>
@@ -307,43 +416,45 @@
     <!-- ============ HISTORY ============ -->
     <section class="screen" id="s-history" hidden style="gap:14px;padding:22px 24px">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <button id="histBackBtn" style="display:flex;align-items:center;gap:7px;background:none;border:none;padding:0;cursor:pointer;color:var(--muted);font-family:inherit;font-size:13px">
+        <button id="histBackBtn" class="pill">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           Back
         </button>
-        <span class="label">SAVED CLIPS</span>
+        <span class="label" style="color:#fff">Saved clips</span>
       </div>
       <div id="histList" style="display:flex;flex-direction:column;gap:9px;overflow-y:auto;flex-grow:1"></div>
-      <div class="mono" style="font-size:10.5px;color:var(--faint);line-height:1.5" id="histFooter"></div>
+      <div style="font-size:11.5px;color:var(--faint);line-height:1.5" id="histFooter"></div>
       <button class="btn btn-primary" id="histNewBtn" style="flex-grow:0;flex-shrink:0">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
         Say something new
       </button>
     </section>
 
     <!-- ============ ERROR / DENIED ============ -->
     <section class="screen" id="s-error" hidden style="justify-content:center;gap:24px;padding:32px 34px">
-      <div style="width:52px;height:52px;border-radius:50%;background:oklch(0.22 0.020 25);border:1px solid oklch(0.34 0.05 25);display:flex;align-items:center;justify-content:center">
+      <div class="card" style="display:flex;flex-direction:column;gap:20px;padding:24px">
+      <div style="width:52px;height:52px;border-radius:50%;background:var(--ink);display:flex;align-items:center;justify-content:center">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="7.5" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12.01" y2="16.5"/></svg>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <div style="font-size:21px;font-weight:500" id="errTitle">Something went wrong</div>
+        <div class="title" id="errTitle">Something went wrong</div>
         <div style="font-size:13.5px;line-height:1.6;color:var(--muted)" id="errBody"></div>
       </div>
       <div id="errSteps" hidden style="display:flex;flex-direction:column;gap:1px;border:1px solid var(--line2);border-radius:10px;overflow:hidden;background:var(--line2)">
-        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">1</span>Click the icon at the left of your address bar</div>
-        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">2</span>Switch <strong style="font-weight:500">Microphone</strong> on</div>
-        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--accent);margin-right:10px">3</span>Reload this page</div>
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--faint);margin-right:10px">1</span>Click the icon at the left of your address bar</div>
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--faint);margin-right:10px">2</span>Switch <strong style="font-weight:500">Microphone</strong> on</div>
+        <div style="padding:14px 16px;background:var(--panel);font-size:13.5px"><span class="mono" style="color:var(--faint);margin-right:10px">3</span>Reload this page</div>
       </div>
-      <div id="errKept" hidden style="padding:12px 14px;border-radius:8px;background:oklch(0.155 0.008 75);border:1px solid var(--line);font-size:13.5px" ></div>
+      <div id="errKept" hidden style="padding:12px 14px;border-radius:4px;background:var(--raised);font-size:13.5px" ></div>
       <button class="btn btn-primary" id="errBtn" style="flex-grow:0">Try again</button>
+      </div>
     </section>
 
   </main>
 
   <footer>
     <div class="status"><span class="dot" id="statusDot" style="background:var(--green)"></span><span id="statusText">ready</span></div>
-    <span class="mono" id="statusRight">en → ru</span>
+    <div><span id="statusRight">en → ru</span></div>
   </footer>
 </div>
 
@@ -477,9 +588,10 @@ function updateMeter() {
   ];
   const zone = zones.find(z => secs < z.limit);
   $("lenLabel").textContent = zone.label;
-  $("lenLabel").style.color = zone.color;
+  // The label stays white for contrast on the gradient; the meter bar
+  // below carries the zone colour.
   ["m1", "m2", "m3"].forEach((id, i) => {
-    $(id).style.background = i < zone.fill ? zone.color : "var(--line2)";
+    $(id).style.background = i < zone.fill ? zone.color : "var(--track)";
   });
 }
 
@@ -526,7 +638,7 @@ document.addEventListener("keydown", e => {
 // ─────────────────────────────────────────────────────────────
 const ICON_DONE    = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.35"/><polyline points="8 12.5 11 15.5 16.5 9"/></svg>`;
 const ICON_ACTIVE  = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg>`;
-const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="oklch(0.42 0.012 75)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/></svg>`;
+const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--line2)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/></svg>`;
 
 let heardText = "", translatedText = "", stageTimes = {};
 
@@ -555,7 +667,7 @@ async function onRecordingStopped() {
   $("ic-1").innerHTML = ICON_ACTIVE;
   $("ic-2").innerHTML = ICON_WAITING;
   $("ic-3").innerHTML = ICON_WAITING;
-  $("t-1").textContent = ""; $("t-2").textContent = ""; $("t-3").textContent = "~10s";
+  $("t-1").textContent = ""; $("t-2").textContent = ""; $("t-3").textContent = "~2s";
   $("procHeard").hidden = true;
   $("procSub").textContent = "Listening back to what you said";
   $("lbl-2").textContent = "Translating to " + (LANGS[$("lang").value] || "");
@@ -778,8 +890,8 @@ function stopPlayback() {
 
 function renderTimings(total) {
   const parts = [
-    ["heard", stageTimes.heard, "var(--green)"],
-    ["translated", stageTimes.translated, "oklch(0.70 0.15 200)"],
+    ["heard", stageTimes.heard, "var(--lime)"],
+    ["translated", stageTimes.translated, "var(--peach)"],
     ["voice", Math.max(stageTimes.voice, 0.1).toFixed(1), "var(--accent)"],
   ];
   $("timings").innerHTML = parts.map(([label, secs, color]) => `
@@ -1052,7 +1164,7 @@ async function openHistory() {
 
 function leaveHistory() {
   if (histAudio) histAudio.pause();
-  $("histBtn").style.borderColor = "var(--line2)";
+  $("histBtn").style.borderColor = "";
   show("s-idle");
   status("ready");
 }
