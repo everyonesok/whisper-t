@@ -333,10 +333,15 @@
           <span class="label">Very long</span>
         </div>
       </div>
-      <button class="btn btn-primary" id="stopBtn" style="flex-grow:0;padding:15px 26px">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
-        Stop and translate
-      </button>
+      <div style="display:flex;gap:10px">
+        <!-- Cancel throws the recording away. It sits beside Stop so the
+             choice is explicit: keep what you said, or discard it. -->
+        <button class="btn btn-ghost" id="cancelBtn" style="flex-grow:0;padding:15px 22px">Cancel</button>
+        <button class="btn btn-primary" id="stopBtn" style="flex-grow:0;padding:15px 26px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
+          Stop and translate
+        </button>
+      </div>
     </section>
 
     <!-- ============ PROCESSING ============ -->
@@ -524,9 +529,15 @@ const MAX_SECONDS = 30;
 // is asynchronous: on first use the permission prompt can outlast the press.
 let holding = false;
 
+// Set by cancelRecording(). The recorder finishes asynchronously and then
+// calls onRecordingStopped(), which checks this to throw the audio away
+// instead of sending it for translation.
+let discardRecording = false;
+
 async function startRecording() {
   if (recorder && recorder.state === "recording") return;
   holding = true;
+  discardRecording = false;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
@@ -605,6 +616,19 @@ function stopRecording() {
   if (audioCtx) audioCtx.close();
 }
 
+// Stop the microphone and throw the recording away: no translation, no
+// API call, back to the start. Same shutdown as stopRecording(); the only
+// difference is the flag that onRecordingStopped() checks.
+function cancelRecording() {
+  discardRecording = true;
+  const wasRecording = holding || (recorder && recorder.state === "recording");
+  stopRecording();
+  if (wasRecording) {
+    show("s-idle");
+    status("ready", "var(--green)");
+  }
+}
+
 // Tap to start, tap again to stop.
 //
 // This was originally hold-to-talk, which is fine for one short sentence
@@ -620,6 +644,14 @@ function toggleRecording() {
 
 $("micBtn").addEventListener("click", toggleRecording);
 $("stopBtn").addEventListener("click", stopRecording);
+$("cancelBtn").addEventListener("click", e => {
+  // Without this, the click would ALSO reach the recording screen's
+  // "tap anywhere to stop" listener below, which runs stopRecording() —
+  // and whichever ran first would decide whether we translate. Stopping
+  // propagation means Cancel is only ever a cancel.
+  e.stopPropagation();
+  cancelRecording();
+});
 
 // Tapping anywhere on the recording screen also stops, so you're never
 // hunting for a small target mid-sentence.
@@ -629,8 +661,10 @@ $("s-rec").addEventListener("click", stopRecording);
 // you made after tabbing away; with a toggle it matters more, since an
 // unattended tab would otherwise keep the microphone open.
 window.addEventListener("blur", stopRecording);
+// Escape cancels (discards), matching what Escape means almost everywhere.
+// It used to stop-and-translate.
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") stopRecording();
+  if (e.key === "Escape") cancelRecording();
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -651,6 +685,10 @@ let isPlaying = false;
 let expectedChunks = 0;
 
 async function onRecordingStopped() {
+  if (discardRecording) {
+    chunks = [];                  // don't keep a cancelled recording in memory
+    return;
+  }
   const blob = new Blob(chunks, { type: "audio/webm" });
   if (blob.size < 1000) {
     showError({ title: "We didn't hear anything",
@@ -1071,6 +1109,29 @@ $("saveBtn").addEventListener("click", async () => {
 // doesn't survive between sessions — the server is a local process with
 // ordinary file access.
 let histAudio = null;
+let histPlayingId = null;      // which clip histAudio belongs to
+
+const ICON_PLAY  = `<svg width="12" height="12" viewBox="0 0 24 24" style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg>`;
+const ICON_PAUSE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
+
+// Swap one library row's button between play and pause.
+function setHistIcon(id, playing) {
+  const btn = document.querySelector(`#histList [data-play="${id}"]`);
+  if (!btn) return;
+  btn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  btn.title = playing ? "Pause" : "Play";
+}
+
+// Fully stop whatever library clip is loaded, and reset its row.
+function stopHistAudio() {
+  if (histAudio) histAudio.pause();
+  if (histPlayingId) {
+    setHistIcon(histPlayingId, false);
+    $(`hrow-${histPlayingId}`)?.classList.remove("playing");
+  }
+  histAudio = null;
+  histPlayingId = null;
+}
 
 function timeAgo(iso) {
   const secs = (Date.now() - new Date(iso)) / 1000;
@@ -1114,8 +1175,7 @@ async function openHistory() {
 
   $("histList").innerHTML = clips.map(c => `
     <div class="srow" id="hrow-${c.id}">
-      <div class="sicon" data-play="${c.id}">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)" style="margin-left:2px"><polygon points="6 4 20 12 6 20"/></svg>
+      <div class="sicon" data-play="${c.id}" title="Play">${ICON_PLAY}
       </div>
       <div style="flex-grow:1;min-width:0">
         <div class="ssrc" style="display:flex;gap:8px;align-items:center">
@@ -1138,23 +1198,39 @@ async function openHistory() {
   $("histFooter").textContent =
     `${clips.length} clip${clips.length === 1 ? "" : "s"} · ${langs.join(", ")} · stored in history/`;
 
-  // Play — one at a time, and clicking a second clip stops the first.
+  // Play / pause — one clip at a time.
+  //   click a clip          → it plays, its icon becomes pause
+  //   click it again        → pauses where it is (row stays highlighted)
+  //   click it again        → carries on from there
+  //   click a different one → the first stops and resets; the new one plays
   $("histList").querySelectorAll("[data-play]").forEach(el => {
     el.onclick = () => {
       const id = el.dataset.play;
-      if (histAudio) { histAudio.pause(); }
-      document.querySelectorAll("#histList .srow").forEach(r => r.classList.remove("playing"));
+
+      if (histAudio && histPlayingId === id) {
+        if (histAudio.paused) {
+          histAudio.play().then(() => setHistIcon(id, true)).catch(() => {});
+        } else {
+          histAudio.pause();
+          setHistIcon(id, false);
+        }
+        return;
+      }
+
+      stopHistAudio();
       histAudio = new Audio(`/api/history/${id}.wav`);
+      histPlayingId = id;
       $(`hrow-${id}`).classList.add("playing");
-      histAudio.onended = () => $(`hrow-${id}`)?.classList.remove("playing");
-      histAudio.play().catch(() => $(`hrow-${id}`)?.classList.remove("playing"));
+      setHistIcon(id, true);
+      histAudio.onended = () => stopHistAudio();
+      histAudio.play().catch(() => stopHistAudio());
     };
   });
 
   $("histList").querySelectorAll("[data-del]").forEach(el => {
     el.onclick = async () => {
       const id = el.dataset.del;
-      if (histAudio) histAudio.pause();
+      stopHistAudio();
       await fetch(`/api/history/${id}`, { method: "DELETE" });
       openHistory();
       refreshHistoryCount();
@@ -1163,7 +1239,7 @@ async function openHistory() {
 }
 
 function leaveHistory() {
-  if (histAudio) histAudio.pause();
+  stopHistAudio();
   $("histBtn").style.borderColor = "";
   show("s-idle");
   status("ready");
