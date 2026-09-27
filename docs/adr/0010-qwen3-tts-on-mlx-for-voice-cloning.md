@@ -1,6 +1,6 @@
 # ADR-0010: Qwen3-TTS on MLX for voice cloning
 
-**Status:** Accepted (on the `qwen-streaming` branch)
+**Status:** Accepted
 **Date:** 2026-09-25
 
 ## Context
@@ -45,10 +45,10 @@ did this internally and the README promises it; Qwen3-TTS doesn't.
 - **Languages drop from 22 to 9.** Kept: Chinese, French, German, Italian,
   Japanese, Korean, Portuguese, Russian, Spanish. Lost: Arabic, Danish, Dutch,
   Finnish, Greek, Hebrew, Hindi, Malay, Norwegian, Polish, Swahili, Swedish,
-  Turkish. They remain available on `main`.
+  Turkish. They remain available in v1 (tag `v1-chatterbox`).
 - **A second environment.** Chatterbox pins `transformers==5.2.0`; `mlx-audio`
   needs `>=5.14`. The two cannot share an install, so this branch runs from
-  `.venv-mlx`. `main` and its `.venv` are untouched and still work.
+  `.venv-mlx`. v1 (tag `v1-chatterbox`) and its `.venv` are untouched and still work.
 - **Qwen needs a transcript of the reference clip.** Whisper makes it once and
   saves `reference.txt` (gitignored: it is the owner's own words). It is
   regenerated whenever `reference.wav` is newer, so re-recording the voice
@@ -71,7 +71,7 @@ did this internally and the README promises it; Qwen3-TTS doesn't.
 ## Alternatives considered
 
 - **Stay on Chatterbox** — keeps 22 languages and its built-in watermark, at
-  four to five times the wait. Remains the choice on `main`.
+  four to five times the wait. Remains the choice in v1 (tag `v1-chatterbox`).
 - **Qwen3-TTS 0.6B** — faster (1.9x, first sound 0.3s) but made more word
   errors in Russian (10% vs 6%) and sounded slightly less like the owner. Both
   are already faster than realtime, so the extra speed buys little.

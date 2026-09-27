@@ -4,7 +4,7 @@ Speak in English, hear it back in another language — **in your own voice**.
 
 A learning prototype. Everything except the translation runs locally on your own machine, and no model is ever trained on your voice.
 
-> **This is the `qwen-streaming` branch.** It swaps the voice model from Chatterbox to **Qwen3-TTS on Apple's MLX runtime**: the whole message is voiced as **one stream** that starts playing within about half a second of generation starting ([ADR-0010](docs/adr/0010-qwen3-tts-on-mlx-for-voice-cloning.md), [ADR-0012](docs/adr/0012-stream-one-generation-per-message.md)). First sound arrives in about 5–6 seconds instead of 20, with no change of voice between sentences, at the cost of 13 of the 22 languages. `main` still runs Chatterbox with all 22.
+> **This is echo v2.** The voice model is **Qwen3-TTS on Apple's MLX runtime**, and the whole message is voiced as **one stream** that starts playing within about half a second of generation starting ([ADR-0010](docs/adr/0010-qwen3-tts-on-mlx-for-voice-cloning.md), [ADR-0012](docs/adr/0012-stream-one-generation-per-message.md)). First sound arrives in about 5–6 seconds, with no change of voice between sentences. It speaks 9 languages. **v1**, with Chatterbox and 22 languages, is kept under the tag [`v1-chatterbox`](../../tree/v1-chatterbox): `git switch --detach v1-chatterbox`, then run it with the Python 3.11 `.venv` from its own README.
 
 ![status](https://img.shields.io/badge/status-prototype-orange) ![python](https://img.shields.io/badge/python-3.12-blue) ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-lightgrey)
 
@@ -46,7 +46,7 @@ It also needs a transcript of that recording. echo makes one with Whisper the fi
 ```bash
 git clone <this repo> && cd whisper-t
 
-# Python 3.12 environment. Named .venv-mlx so it can sit beside main's
+# Python 3.12 environment. Named .venv-mlx so it can sit beside v1's
 # .venv — the two voice libraries can't share one (ADR-0010).
 uv venv --python 3.12 .venv-mlx
 uv pip install --python .venv-mlx/bin/python -r requirements.txt
@@ -90,9 +90,9 @@ version:
 
 | | First sound | Voice fully generated |
 |---|---|---|
-| Chatterbox, one sentence at a time (`main`) | 21.6s | 49.6s |
+| v1: Chatterbox, one sentence at a time | 21.6s | 49.6s |
 | Qwen3-TTS, one sentence at a time | 9.9s | 17.8s |
-| **Qwen3-TTS, one stream per message** (this branch) | **~6.0s** | **16.4s** |
+| **v2: Qwen3-TTS, one stream per message** | **~6.0s** | **16.4s** |
 
 Of that ~6 seconds, about 2.5 s is speech-to-text, 2 s is translation (all
 sentences at once), 0.8 s is the voice model's first audio, and 0.6 s is a
@@ -107,7 +107,7 @@ Russian word accuracy is roughly the same: transcribing the generated
 speech back with a multilingual Whisper, 6% of words weren't heard as
 intended with Qwen3-TTS, against 5% with Chatterbox.
 
-The figures below were measured on `main`, with Chatterbox. They explain
+The figures below were measured on v1, with Chatterbox. They explain
 why speech was split into sentences in the first place. Streaming made the
 split unnecessary for speed, and generating sentences separately made each
 one sound like a slightly different speaker (ADR-0012).
@@ -193,7 +193,7 @@ All nine target languages the voice model supports are enabled:
 
 **The voice model is the constraint, not the translation.** Claude translates into far more languages than this; Qwen3-TTS can only *speak* these nine plus English, the source.
 
-Compared with `main`, this branch drops Arabic, Danish, Dutch, Finnish, Greek, Hebrew, Hindi, Malay, Norwegian, Polish, Swahili, Swedish and Turkish. Use `main` for those.
+Compared with v1, v2 drops Arabic, Danish, Dutch, Finnish, Greek, Hebrew, Hindi, Malay, Norwegian, Polish, Swahili, Swedish and Turkish. Use the `v1-chatterbox` tag for those.
 
 To change the list, edit `LANGUAGES` in `pipeline.py`. The key is a short code used in URLs and filenames; the value is the name Claude translates into, and lowercased, the name the voice model expects. The server checks every entry against the model at startup and refuses to start if one isn't supported.
 
@@ -216,8 +216,8 @@ check_key.py     Verifies your API key without printing it.
 chunk_test.py    Shows how a recording splits into sentences.
 test_buffer.py   Unit tests for sentence chunking — no models, runs instantly.
 bench_streaming.py  Measures chunked vs one-clip generation (either engine).
-smoke_test.py    Chatterbox only — run with main's .venv.
-bench.py         Chatterbox only — run with main's .venv.
+smoke_test.py    v1 (Chatterbox) only — run from the v1-chatterbox tag.
+bench.py         v1 (Chatterbox) only — run from the v1-chatterbox tag.
 *.dc.html        Design source for the seven interface states.
 canvas.json      Layout for those design artboards.
 ```
@@ -266,4 +266,4 @@ Two things are worth knowing if you build on this:
 
 Prototype code — do what you like with it.
 
-Built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache-2.0, Alibaba Qwen), [mlx-audio](https://github.com/Blaizzy/mlx-audio) (MIT), [Perth](https://github.com/resemble-ai/perth) (MIT, Resemble AI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), and the [Anthropic API](https://docs.anthropic.com). The `main` branch uses [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT, Resemble AI).
+Built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache-2.0, Alibaba Qwen), [mlx-audio](https://github.com/Blaizzy/mlx-audio) (MIT), [Perth](https://github.com/resemble-ai/perth) (MIT, Resemble AI), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), and the [Anthropic API](https://docs.anthropic.com). v1 uses [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT, Resemble AI).

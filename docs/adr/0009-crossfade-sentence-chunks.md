@@ -1,6 +1,6 @@
 # ADR-0009: Crossfade sentence chunks when joining
 
-**Status:** Accepted — **Superseded by:** ADR-0012 (on the `qwen-streaming` branch: one stream per message, so no joins to crossfade)
+**Status:** Accepted — **Superseded by:** ADR-0012 (one stream per message, so no joins to crossfade)
 **Date:** 2026-09-14
 
 ## Context

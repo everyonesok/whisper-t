@@ -1,6 +1,6 @@
 # ADR-0011: Gradient visual language and system type
 
-**Status:** Accepted (on the `qwen-streaming` branch)
+**Status:** Accepted
 **Date:** 2026-09-25
 
 ## Context

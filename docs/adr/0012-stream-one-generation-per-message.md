@@ -1,6 +1,6 @@
 # ADR-0012: Stream one generation per message
 
-**Status:** Accepted (on the `qwen-streaming` branch)
+**Status:** Accepted
 **Date:** 2026-09-26
 
 ## Context
