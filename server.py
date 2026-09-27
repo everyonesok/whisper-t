@@ -61,7 +61,11 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def index():
-    return FileResponse(HERE / "index.html")
+    # Never let the browser reuse an old copy of the page. When the server's
+    # event format changes (as it did for streaming, ADR-0012), a cached page
+    # silently waits forever for events that no longer exist -- this bit
+    # twice before this header existed.
+    return FileResponse(HERE / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/languages")
