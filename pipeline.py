@@ -217,6 +217,75 @@ class SentenceBuffer:
         return remaining or None
 
 
+# ── Watermarking a stream ──────────────────────────────────────────────
+#
+# Perth watermarks a whole clip at a time, and it behaves slightly
+# differently at the very start and end of whatever it's given. Watermark
+# 0.3-second streaming pieces one by one and every join gets two fresh
+# edges: measured, the sample-to-sample jump at the joins went up 4x and
+# the biggest one was larger than anything else in the audio -- a faint
+# tick three times a second.
+#
+# So each piece is watermarked together with the audio just BEFORE it
+# (the edge then lands in audio we discard), and the last 20ms of every
+# pass is held back and crossfaded into the next pass's version of the
+# same samples. Every emitted sample comes from the smooth interior of a
+# pass, or from a blend of two.
+WATERMARK_CONTEXT_SECONDS = 0.32
+WATERMARK_FADE_MS = 20
+
+
+class StreamWatermarker:
+    """
+    Watermark audio that arrives in pieces, without clicks at the joins.
+
+        wm = StreamWatermarker(perth_watermarker, sample_rate)
+        for piece in pieces:
+            out = wm.push(piece)     # may be slightly shorter than piece
+        out = wm.finish()            # the held-back remainder
+
+    Total output length always equals total input length.
+    """
+
+    def __init__(self, watermarker, sample_rate):
+        self.wm = watermarker
+        self.sr = sample_rate
+        self.context_len = int(sample_rate * WATERMARK_CONTEXT_SECONDS)
+        self.fade_len = int(sample_rate * WATERMARK_FADE_MS / 1000)
+        self.raw_tail = np.zeros(0, dtype=np.float32)   # recent unwatermarked audio
+        self.held = np.zeros(0, dtype=np.float32)       # watermarked, not yet emitted
+
+    def push(self, piece):
+        piece = np.asarray(piece, dtype=np.float32)
+        if len(piece) == 0:
+            return piece
+        window = np.concatenate([self.raw_tail, piece])
+        marked = self.wm.apply_watermark(window, sample_rate=self.sr).astype(np.float32)
+        start = len(self.raw_tail)                      # where `piece` begins in `window`
+
+        # Blend the held samples (end of the last pass, near its edge) into
+        # this pass's version of the same samples (interior, clean).
+        h = len(self.held)
+        out = []
+        if h:
+            ramp = np.linspace(0.0, 1.0, h, dtype=np.float32)
+            out.append(self.held * (1.0 - ramp) + marked[start - h:start] * ramp)
+
+        # Emit this piece, minus a new tail to hold for the next blend.
+        keep = min(self.fade_len, len(piece))
+        out.append(marked[start:len(marked) - keep])
+        self.held = marked[len(marked) - keep:]
+
+        # Remember enough raw audio to give the next pass its context. It must
+        # cover the held samples, so the next pass contains them too.
+        self.raw_tail = window[-max(self.context_len, keep):]
+        return np.concatenate(out)
+
+    def finish(self):
+        out, self.held = self.held, np.zeros(0, dtype=np.float32)
+        return out
+
+
 class VoiceTranslator:
     def __init__(self, reference_voice="reference.wav"):
         self.reference_voice = reference_voice
@@ -252,7 +321,8 @@ class VoiceTranslator:
         # slower. Burn that cost here so the first real request is fast.
         print("Warming up...", flush=True)
         t0 = time.time()
-        self._generate("Привет.", "ru")
+        for _ in self.speak_stream("Привет.", "ru"):
+            pass
         print(f"Warmed up in {time.time()-t0:.1f}s — ready.\n", flush=True)
 
     def _reference_transcript(self):
@@ -279,15 +349,24 @@ class VoiceTranslator:
         txt.write_text(text)
         return text
 
-    def _generate(self, text, lang_code):
+    def speak_stream(self, text, lang_code):
         """
-        Run Qwen3-TTS and return (samples, sample_rate), watermarked.
+        Stage 3, streaming: yields (samples, sample_rate) pieces of watermarked
+        audio as Qwen3-TTS produces them, roughly every 0.3 seconds.
 
-        stream=True even though the pieces are joined here: in mlx-audio
-        streaming measured about twice as fast as whole-clip generation
-        for the same sentence (1.4x vs 0.8x realtime).
+        Pass the WHOLE message, not one sentence at a time. Generated
+        separately, each sentence re-guesses the voice: joins measured 2-7
+        semitones apart and sounded like a different speaker. One generation
+        keeps one voice and lets intonation carry across sentences (ADR-0012).
+
+        Watermarking happens per piece through StreamWatermarker, which
+        avoids the clicks naive per-piece watermarking causes. Every yielded
+        piece is final audio -- safe to play the moment it arrives.
+
+        This is a generator: generation only runs while someone iterates it,
+        and stops if they stop (e.g. the browser disconnects).
         """
-        pieces, sample_rate = [], None
+        marker = None
         for result in self.tts.generate(
             text=text,
             ref_audio=self.reference_voice,
@@ -296,12 +375,16 @@ class VoiceTranslator:
             stream=True,
             streaming_interval=0.32,
         ):
-            pieces.append(np.array(result.audio, dtype=np.float32))
             sample_rate = result.sample_rate
-
-        audio = np.concatenate(pieces)
-        audio = self.watermarker.apply_watermark(audio, sample_rate=sample_rate)
-        return audio.astype(np.float32), sample_rate
+            if marker is None:
+                marker = StreamWatermarker(self.watermarker, sample_rate)
+            out = marker.push(np.array(result.audio, dtype=np.float32))
+            if len(out):
+                yield out, sample_rate
+        if marker is not None:
+            tail = marker.finish()
+            if len(tail):
+                yield tail, marker.sr
 
     def transcribe(self, audio_path):
         """Stage 1: spoken audio -> written text."""
@@ -386,8 +469,10 @@ class VoiceTranslator:
         return blocks[0].text.strip()
 
     def speak(self, text, lang_code, out_path="output.wav"):
-        """Stage 3: translated text -> audio in the reference voice."""
-        audio, sample_rate = self._generate(text, lang_code)
+        """Stage 3, whole clip: translated text -> audio file in the reference voice."""
+        pieces = list(self.speak_stream(text, lang_code))
+        audio = np.concatenate([p for p, _ in pieces])
+        sample_rate = pieces[0][1]
         # 32-bit float WAV, the same format Chatterbox wrote, so the history
         # joiner and the browser's WAV reader see nothing different.
         sf.write(out_path, audio, sample_rate, subtype="FLOAT")

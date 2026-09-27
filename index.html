@@ -213,6 +213,7 @@
     padding: 15px 22px; border-radius: 999px; cursor: pointer; border: none;
     font-family: inherit; font-size: 14.5px; font-weight: 500; letter-spacing: -0.01em;
     transition: transform 0.1s, background 0.15s;
+    white-space: nowrap;   /* a label should never wrap inside a pill */
   }
   .btn-primary { background: var(--ink); color: #fff; flex-grow: 1; }
   .btn-primary:hover { background: #000; }
@@ -255,12 +256,36 @@
   .srow .ssrc > span { white-space: nowrap; }   /* keep "10d ago", "3 sentences" whole on narrow screens */
   .srow .stxt { font-size: 16px; line-height: 1.4; letter-spacing: -0.01em; margin-top: 3px; }
 
+  /* ── Result transport: one play/pause for the whole message ───── */
+  .transport { display: flex; align-items: center; gap: 12px; padding: 10px 14px; flex-shrink: 0; }
+  .tbtn {
+    width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .tbtn polygon { fill: #fff; }
+  .tbar { flex-grow: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .tfill { height: 100%; width: 0; background: var(--live); border-radius: 2px; }
+  .ttime { font-size: 12px; color: var(--faint); min-width: 74px; text-align: right; }
+  #sentenceList .srow { cursor: pointer; }
+  #sentenceList .srow:hover { background: #fff; }
+  .snum {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 500; color: var(--faint); border: 1px solid var(--line2);
+  }
+  .srow.playing .snum { background: var(--ink); color: #fff; border-color: var(--ink); }
+
   /* ── Small screens: drop the frame, fill the viewport ────────── */
   @media (max-width: 600px) {
     body { padding: 0; }
     .app { width: 100%; height: 100vh; max-height: none; border: none; }
     .node { display: none; }
     .display { font-size: 34px; }
+    /* Three buttons don't fit side by side at phone width: the main
+       action gets its own row, Replay and Save share the next. */
+    .result-actions { flex-wrap: wrap; }
+    .result-actions #againBtn { flex-basis: 100%; }
+    .result-actions #saveBtn { flex-grow: 1; }
   }
 </style>
 </head>
@@ -382,13 +407,20 @@
     </section>
 
     <!-- ============ RESULT ============ -->
-    <!-- Sentences arrive one at a time and start playing while later ones
-         are still generating, so this screen is live rather than final. -->
+    <!-- The whole message plays as ONE audio stream that starts while the
+         rest is still being generated. The rows are for reading; the one
+         being spoken is highlighted (estimated from text length). -->
     <section class="screen" id="s-result" hidden style="gap:14px;padding:22px 24px">
 
       <div style="display:flex;align-items:center;justify-content:space-between">
         <span class="label" id="resultCount">1 SENTENCE</span>
         <button class="linkish" id="redoBtn">Not what you said?</button>
+      </div>
+
+      <div class="card transport">
+        <button class="tbtn" id="playBtn" title="Pause"></button>
+        <div class="tbar"><div class="tfill" id="tfill"></div></div>
+        <span class="mono ttime" id="ttime">0:00</span>
       </div>
 
       <div id="sentenceList" style="display:flex;flex-direction:column;gap:9px;overflow-y:auto;flex-grow:1"></div>
@@ -403,7 +435,7 @@
         <span style="font-size:11.5px;color:var(--text)" id="filename"></span>
       </div>
 
-      <div style="display:flex;gap:10px">
+      <div class="result-actions" style="display:flex;gap:10px">
         <button class="btn btn-primary" id="againBtn">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
           Say something else
@@ -636,6 +668,7 @@ function cancelRecording() {
 // holding a button down for 20+ seconds while you talk is genuinely
 // uncomfortable, and multi-sentence input is the whole point of chunking.
 function toggleRecording() {
+  ensureAudio();   // unlock audio now, inside the tap -- the voice arrives seconds later
   // `holding` covers the gap where we've asked for the microphone but the
   // browser hasn't granted it yet, so a fast second tap still cancels.
   const busy = holding || (recorder && recorder.state === "recording");
@@ -679,15 +712,218 @@ const ICON_WAITING = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none
 
 let heardText = "", translatedText = "", stageTimes = {};
 
-// Sentences arrive one at a time from the server. Each entry is
-// { index, source, text, blob, audio } and lands in its own slot, so a
-// slow sentence never blocks a later one from being stored.
-let sentences = [];
-let playCursor = 1;        // 1-based index of the sentence we want to play next
-let isPlaying = false;     // a sentence is loaded as "current" -- stays true while paused,
-                           // which is what stops the queue advancing during a pause
-let currentIndex = null;   // which sentence that is
+// ─────────────────────────────────────────────────────────────
+// StreamPlayer — gapless playback of audio that arrives in pieces
+// ─────────────────────────────────────────────────────────────
+// The server sends the whole message as ~0.3s pieces while it is still
+// generating the rest. Playing each piece "when the previous one ends"
+// leaves tiny gaps; instead every piece is scheduled on the audio clock to
+// start at the exact sample where the previous one stops.
+//
+// The context runs at the voice model's own 24kHz, so pieces are never
+// resampled one by one (which would put a glitch at every join) — the OS
+// resamples the finished, continuous stream instead.
+//
+// Long messages generate only just faster than they play (1.1x measured),
+// so playback waits for START_BUFFER seconds before starting, and if it
+// ever runs dry it waits for REBUFFER seconds rather than stuttering.
+// (1.0s start buffer cost ~0.7s of first-sound delay for no stall seen;
+// 0.6s keeps a margin — the rebuffer path covers the rare dry spell.)
+const START_BUFFER = 0.6;   // seconds of audio to have before starting
+const REBUFFER     = 0.5;   // seconds to gather again after running dry
+const LEAD         = 0.05;  // schedule this far ahead of "now"
+const VOICE_RATE   = 24000; // Qwen3-TTS output sample rate
+
+let sharedAudioCtx = null;
+
+// resume()/suspend() return promises that can reject (e.g. on an offline
+// context used in tests). Nothing depends on them, so don't leak errors.
+const quietly = promise => { if (promise && promise.catch) promise.catch(() => {}); };
+
+// Browsers only let a tap start audio, and the stream arrives seconds after
+// the tap. So the context is created (or woken) during the tap itself.
+function ensureAudio() {
+  if (!sharedAudioCtx) {
+    try {
+      sharedAudioCtx = new AudioContext({ sampleRate: VOICE_RATE, latencyHint: "playback" });
+    } catch {
+      sharedAudioCtx = new AudioContext();   // older browsers: resampled, still works
+    }
+  }
+  if (sharedAudioCtx.state === "suspended") quietly(sharedAudioCtx.resume());
+  return sharedAudioCtx;
+}
+
+class StreamPlayer {
+  // state: waiting | playing | buffering | paused | ended | stopped
+  constructor(ctx, { onState = () => {}, onEnded = () => {} } = {}) {
+    this.ctx = ctx;
+    this.onState = onState;
+    this.onEnded = onEnded;
+    this.pieces = [];     // AudioBuffers, in order
+    this.offsets = [];    // where each piece starts in the message, seconds
+    this.total = 0;       // seconds received so far
+    this.done = false;    // the server has sent everything
+    this.next = 0;        // next piece to schedule
+    this.within = 0;      // start this far into piece `next` (after a seek)
+    this.cursor = 0;      // audio-clock time where the next piece starts
+    this.segments = [];   // what's scheduled: { at, off, dur }
+    this.sources = [];
+    this.token = 0;       // bumps on every seek/stop, so stale callbacks ignore themselves
+    this.seekPos = 0;     // position to report when nothing is scheduled yet
+    this.state = "waiting";
+    this.resumeTo = null; // state to return to after a pause
+    if (ctx.state === "suspended") quietly(ctx.resume());
+  }
+
+  push(samples, sampleRate) {
+    if (this.state === "stopped") return;
+    const buf = this.ctx.createBuffer(1, samples.length, sampleRate);
+    buf.copyToChannel(samples, 0);
+    this.offsets.push(this.total);
+    this.pieces.push(buf);
+    this.total += buf.duration;
+    this._pump();
+  }
+
+  end() {
+    this.done = true;
+    this._pump();
+  }
+
+  // Seconds received but not yet scheduled to play.
+  queued() {
+    if (this.next >= this.pieces.length) return 0;
+    return this.total - this.offsets[this.next] - this.within;
+  }
+
+  _set(state) {
+    if (this.state === state) return;
+    this.state = state;
+    this.onState(state);
+  }
+
+  _pump() {
+    if (["paused", "ended", "stopped"].includes(this.state)) return;
+
+    // Scheduled audio already ran out before this piece arrived: that's a
+    // stall, however briefly. Gather a little before carrying on.
+    if (this.state === "playing" && this.cursor < this.ctx.currentTime) this._set("buffering");
+
+    if (this.state === "waiting" || this.state === "buffering") {
+      const need = this.state === "waiting" ? START_BUFFER : REBUFFER;
+      if (this.next >= this.pieces.length) {
+        if (this.done) this._finish();
+        return;
+      }
+      if (this.queued() < need && !this.done) return;
+      this.cursor = this.ctx.currentTime + LEAD;
+      this._set("playing");
+    }
+
+    while (this.next < this.pieces.length) this._schedule();
+  }
+
+  _schedule() {
+    const i = this.next++;
+    const within = this.within;
+    this.within = 0;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.pieces[i];
+    src.connect(this.ctx.destination);
+    const dur = this.pieces[i].duration - within;
+    src.start(this.cursor, within);
+    this.segments.push({ at: this.cursor, off: this.offsets[i] + within, dur });
+    this.sources.push(src);
+    this.cursor += dur;
+
+    // When the latest piece finishes and nothing followed it, we either
+    // reached the end or ran dry.
+    const token = this.token;
+    src.onended = () => {
+      if (token !== this.token || src !== this.sources[this.sources.length - 1]) return;
+      if (this.state !== "playing") return;
+      if (this.next < this.pieces.length) return;
+      if (this.done) this._finish(); else this._set("buffering");
+    };
+  }
+
+  _finish() {
+    this._set("ended");
+    this.onEnded();
+  }
+
+  // Where playback is, in seconds from the start of the message.
+  position() {
+    const t = this.ctx.currentTime;
+    let pos = this.seekPos;
+    for (const s of this.segments) {
+      if (s.at > t) break;
+      pos = s.off + Math.min(t - s.at, s.dur);
+    }
+    return Math.min(pos, this.total);
+  }
+
+  pause() {
+    if (!["waiting", "playing", "buffering"].includes(this.state)) return;
+    this.resumeTo = this.state;
+    quietly(this.ctx.suspend());    // freezes the audio clock: exact pause
+    this._set("paused");
+  }
+
+  resume() {
+    if (this.state !== "paused") return;
+    quietly(this.ctx.resume());
+    this._set(this.resumeTo || "playing");
+    this._pump();
+  }
+
+  // Jump to `seconds` into the message and play from there.
+  seek(seconds) {
+    if (this.state === "stopped") return;
+    this._stopSources();
+    const pos = Math.max(0, Math.min(seconds, this.total));
+    this.seekPos = pos;
+    let i = this.offsets.length - 1;
+    while (i > 0 && this.offsets[i] > pos) i--;
+    this.next = Math.max(i, 0);
+    this.within = this.pieces.length ? Math.max(0, pos - this.offsets[this.next]) : 0;
+    if (this.pieces.length && this.within >= this.pieces[this.next].duration - 1e-6) {
+      this.next++; this.within = 0;
+    }
+    if (this.ctx.state === "suspended") quietly(this.ctx.resume());
+    this.resumeTo = null;
+    // Re-enter through the buffering gate: plays at once if the audio is
+    // already here (a replay, or a jump backwards), otherwise waits for it.
+    this.state = "buffering";
+    this._pump();
+    if (this.state === "buffering") this.onState("buffering");
+  }
+
+  stop() {
+    this._stopSources();
+    this._set("stopped");
+  }
+
+  _stopSources() {
+    this.token++;
+    for (const s of this.sources) { try { s.stop(); } catch {} }
+    this.sources = [];
+    this.segments = [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// The pipeline call — reads progress as it streams in
+// ─────────────────────────────────────────────────────────────
+let pairs = [];          // [{ source, text }] — one per sentence, for the rows
+let player = null;       // StreamPlayer for the current translation
+let runId = 0;           // bumps per recording, so an old stream can't leak into a new one
+let abortStream = null;  // cancels the in-flight request
 let expectedChunks = 0;
+let finishedIn = null;   // total seconds, once the server says "complete"
+let requestStart = 0;    // when the recording was sent
+let firstSoundAt = null; // seconds from sending to actually hearing sound
 
 async function onRecordingStopped() {
   if (discardRecording) {
@@ -702,15 +938,18 @@ async function onRecordingStopped() {
     return;
   }
 
+  stopPlayback();                 // also aborts any earlier stream still running
+  const myRun = ++runId;
   heardText = ""; translatedText = ""; stageTimes = {};
-  sentences = []; playCursor = 1; isPlaying = false; currentIndex = null; expectedChunks = 0; genTimes = []; savedId = null;
+  pairs = []; expectedChunks = 0; savedId = null; finishedIn = null;
+  requestStart = performance.now(); firstSoundAt = null;
   $("sentenceList").innerHTML = "";
   $("timings").innerHTML = "";
 
   $("ic-1").innerHTML = ICON_ACTIVE;
   $("ic-2").innerHTML = ICON_WAITING;
   $("ic-3").innerHTML = ICON_WAITING;
-  $("t-1").textContent = ""; $("t-2").textContent = ""; $("t-3").textContent = "~2s";
+  $("t-1").textContent = ""; $("t-2").textContent = ""; $("t-3").textContent = "~1s";
   $("procHeard").hidden = true;
   $("procSub").textContent = "Listening back to what you said";
   $("lbl-2").textContent = "Translating to " + (LANGS[$("lang").value] || "");
@@ -721,10 +960,14 @@ async function onRecordingStopped() {
   form.append("audio", blob, "recording.webm");
   form.append("language", $("lang").value);
 
+  const controller = new AbortController();
+  abortStream = () => controller.abort();
+
   let res;
   try {
-    res = await fetch("/api/translate", { method: "POST", body: form });
-  } catch {
+    res = await fetch("/api/translate", { method: "POST", body: form, signal: controller.signal });
+  } catch (err) {
+    if (err.name === "AbortError") return;
     showError({ title: "Lost the connection",
       body: "The server isn't responding. Check the terminal window where you started it.",
       button: "Try again", action: () => show("s-idle") });
@@ -734,21 +977,30 @@ async function onRecordingStopped() {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop();
-    for (const line of lines) {
-      if (line.trim()) handleEvent(JSON.parse(line));
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || myRun !== runId) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (line.trim() && myRun === runId) handleEvent(JSON.parse(line));
+      }
     }
+  } catch (err) {
+    if (err.name !== "AbortError") throw err;
   }
 }
 
+// Raw little-endian float32 PCM, base64 — the format server.py sends.
+function decodePcm(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  return new Float32Array(bytes.buffer);
+}
+
 function handleEvent(ev) {
-  if (ev.status === "error" && ev.stage !== "chunk") return handleStageError(ev);
+  if (ev.status === "error") return handleStageError(ev);
 
   if (ev.stage === "transcribe" && ev.status === "done") {
     heardText = ev.text;
@@ -760,221 +1012,194 @@ function handleEvent(ev) {
     $("procHeardText").textContent = `"${ev.text}"`;
     $("procHeard").hidden = false;
     $("procSub").textContent = ev.chunks > 1
-      ? `${ev.chunks} sentences — you'll hear the first one shortly`
+      ? `${ev.chunks} sentences — translating them together`
       : "Finding the natural way to say it";
   }
 
+  // The text is ready: show it straight away. The voice follows in a moment.
   if (ev.stage === "translate" && ev.status === "done") {
     translatedText = ev.text;
     stageTimes.translated = ev.seconds;
+    pairs = ev.sentences || [{ source: heardText, text: ev.text }];
     $("ic-2").innerHTML = ICON_DONE;
     $("t-2").textContent = ev.seconds + "s";
+    openResultScreen();
   }
 
   if (ev.stage === "speak" && ev.status === "start") {
-    $("ic-3").innerHTML = ICON_ACTIVE;
-    $("procSub").textContent = "Almost there — this is the slow part";
+    player = new StreamPlayer(ensureAudio(), { onState: onPlayerState, onEnded: onPlayerEnded });
+    onPlayerState("waiting");
   }
 
-  // Each sentence lands here as it finishes generating.
-  if (ev.stage === "chunk") {
-    if (sentences.length === 0) openResultScreen();
-    addSentence(ev);
+  if (ev.stage === "audio" && player) {
+    player.push(decodePcm(ev.pcm), ev.sample_rate);
+  }
+
+  if (ev.stage === "speak" && ev.status === "done") {
+    stageTimes.voice = ev.seconds;
+    stageTimes.firstAudio = ev.first_audio;
+    if (player) player.end();
   }
 
   if (ev.stage === "complete") {
     savedId = ev.saved || null;
+    finishedIn = ev.seconds;
     if (ev.saved) refreshHistoryCount();
-    stageTimes.voice = ev.seconds - (stageTimes.heard || 0) - (stageTimes.translated || 0);
     renderTimings(ev.seconds);
-    status(`done in ${ev.seconds}s`, "var(--green)");
+    // Don't talk over the player: "done in 8.7s" only once it's not busy.
+    if (!player || ["ended", "stopped"].includes(player.state)) {
+      status(`done in ${ev.seconds}s`, "var(--green)");
+    }
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Result screen: sentences arriving live
+// Result screen: the text, one play/pause, a live highlight
 // ─────────────────────────────────────────────────────────────
 function openResultScreen() {
-  $("resultCount").textContent =
-    expectedChunks === 1 ? "1 SENTENCE" : `${expectedChunks} SENTENCES`;
-  // Draw a placeholder row for every sentence we're expecting, so you can
-  // see what's still coming rather than watching rows appear from nowhere.
-  $("sentenceList").innerHTML = "";
-  for (let i = 1; i <= expectedChunks; i++) {
-    const row = document.createElement("div");
-    row.className = "srow pending";
-    row.id = `srow-${i}`;
-    row.innerHTML = `
-      <div class="sicon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-        stroke="var(--faint)" stroke-width="2.4" stroke-linecap="round">
-        <circle cx="12" cy="12" r="10" stroke-opacity="0.3"/>
-        <path class="spin" d="M12 2a10 10 0 0 1 10 10"/></svg></div>
+  const n = pairs.length;
+  $("resultCount").textContent = n === 1 ? "1 SENTENCE" : `${n} SENTENCES`;
+  $("sentenceList").innerHTML = pairs.map((p, i) => `
+    <div class="srow" id="srow-${i + 1}" data-i="${i}" title="Play from here">
+      <div class="snum">${i + 1}</div>
       <div style="flex-grow:1">
-        <div class="ssrc" id="swait-${i}">waiting to generate…</div>
-      </div>`;
-    $("sentenceList").appendChild(row);
-  }
-  show("s-result");
-}
-
-function addSentence(ev) {
-  const row = $(`srow-${ev.index}`);
-
-  if (ev.status === "error") {
-    // One sentence failed. Keep its text visible so the work isn't lost.
-    row.className = "srow";
-    row.innerHTML = `
-      <div class="sicon" style="border-color:var(--red)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--red)"
-          stroke-width="2.6" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/></svg></div>
-      <div style="flex-grow:1">
-        <div class="ssrc">${escapeHtml(ev.source)}</div>
-        <div class="stxt" style="color:var(--muted)">${escapeHtml(ev.text)}</div>
-        <div class="ssrc" style="color:var(--red);margin-top:4px">couldn't generate audio</div>
-      </div>`;
-    // Don't let a failed sentence stall the queue behind it.
-    if (playCursor === ev.index) { playCursor++; tryPlayNext(); }
-    return;
-  }
-
-  const bytes = Uint8Array.from(atob(ev.audio), c => c.charCodeAt(0));
-  const blob = new Blob([bytes], { type: "audio/wav" });
-  const audio = new Audio(URL.createObjectURL(blob));
-
-  sentences[ev.index - 1] = { index: ev.index, source: ev.source, text: ev.text, blob, audio };
-
-  row.className = "srow";
-  row.innerHTML = `
-    <div class="sicon" id="sicon-${ev.index}" title="Play">${ICON_PLAY}</div>
-    <div style="flex-grow:1">
-      <div class="ssrc">${escapeHtml(ev.source)}</div>
-      <div class="stxt">${escapeHtml(ev.text)}</div>
-    </div>
-    <span class="mono" style="font-size:10.5px;color:var(--faint);flex-shrink:0">${ev.seconds}s</span>`;
-
-  // The sentence that's playing: its button pauses and resumes it.
-  // Any other sentence: jump there and carry on in order from it.
-  $(`sicon-${ev.index}`).onclick = () => {
-    if (currentIndex === ev.index) { togglePause(); return; }
-    stopPlayback();
-    playCursor = ev.index;
-    tryPlayNext();
-  };
-
+        <div class="ssrc">${escapeHtml(p.source)}</div>
+        <div class="stxt">${escapeHtml(p.text)}</div>
+      </div>
+    </div>`).join("");
+  // Tap a sentence to hear it from there.
+  $("sentenceList").querySelectorAll(".srow").forEach(row => {
+    row.onclick = () => {
+      if (!player) return;
+      ensureAudio();
+      player.seek(sentenceStarts()[+row.dataset.i]);
+      updateTransport();
+    };
+  });
+  highlighted = -1;
+  $("tfill").style.width = "0%";
+  $("ttime").textContent = "0:00";
+  setPlayButton("waiting");
   updateFilename();
-  updatePendingEstimates(ev.seconds);
-  tryPlayNext();
+  show("s-result");
+  requestAnimationFrame(tickTransport);
 }
 
-// Once one sentence has been generated we know roughly how long the rest
-// will take, so the remaining rows can say "~9s" instead of leaving you
-// staring at an open-ended spinner.
-let genTimes = [];
-function updatePendingEstimates(lastSeconds) {
-  if (lastSeconds) genTimes.push(lastSeconds);
-  if (!genTimes.length) return;
-  const avg = genTimes.reduce((a, b) => a + b, 0) / genTimes.length;
+// Where each sentence starts in the audio — estimated, because one stream
+// has no sentence markers. Speech time tracks text length closely enough;
+// the constant adds each sentence's closing pause.
+const CHARS_PER_SECOND = 13;   // measured on Qwen3-TTS Russian, ~12-14
+const SENTENCE_PAUSE_CHARS = 6;
+function sentenceStarts() {
+  const weights = pairs.map(p => p.text.length + SENTENCE_PAUSE_CHARS);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  // Before the stream ends the total isn't known yet: estimate it.
+  const total = player && player.done ? player.total : sum / CHARS_PER_SECOND;
+  let t = 0;
+  return weights.map(w => { const start = t; t += total * w / sum; return start; });
+}
 
-  let ahead = 0;
-  for (let i = 1; i <= expectedChunks; i++) {
-    if (sentences[i - 1]) continue;          // already done
-    ahead++;
-    const el = $(`swait-${i}`);
-    if (el) el.textContent = `generating… about ${Math.round(avg * ahead)}s away`;
+let highlighted = -1;
+function setHighlight(i) {
+  if (i === highlighted) return;
+  highlighted = i;
+  document.querySelectorAll("#sentenceList .srow").forEach((row, k) => {
+    row.classList.toggle("playing", k === i);
+  });
+}
+
+function fmtTime(s) {
+  s = Math.max(0, Math.floor(s));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// Redraw the progress bar, clock and highlighted sentence. Called every
+// frame for smooth motion, AND straight after every action and state
+// change — browsers slow or pause frame callbacks for tabs that aren't
+// visible, and a tap should never wait for the next frame to show.
+function tickTransport() {
+  if ($("s-result").hidden) return;
+  updateTransport();
+  requestAnimationFrame(tickTransport);
+}
+
+function updateTransport() {
+  if (player) {
+    const pos = player.position();
+    const starts = sentenceStarts();
+    const total = player.done ? player.total : null;
+    const estTotal = total || Math.max(player.total, starts.length
+      ? (pairs.reduce((a, p) => a + p.text.length + SENTENCE_PAUSE_CHARS, 0) / CHARS_PER_SECOND) : 1);
+    $("tfill").style.width = `${Math.min(100, (pos / estTotal) * 100)}%`;
+    $("ttime").textContent = total ? `${fmtTime(pos)} / ${fmtTime(total)}` : `${fmtTime(pos)} / …`;
+    const active = ["playing", "buffering", "paused"].includes(player.state);
+    let idx = -1;
+    if (active) { idx = 0; starts.forEach((st, k) => { if (pos >= st) idx = k; }); }
+    setHighlight(idx);
   }
 }
 
-// Plays sentences strictly in order. If the next one hasn't arrived yet
-// this simply stops; addSentence() calls back in when it lands, so the
-// queue resumes on its own without polling.
-function tryPlayNext() {
-  if (isPlaying) return;
-  const s = sentences[playCursor - 1];
-  if (!s) return;
+function setPlayButton(state) {
+  const playing = ["waiting", "playing", "buffering"].includes(state);
+  $("playBtn").innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  $("playBtn").title = playing ? "Pause" : "Play";
+}
 
-  isPlaying = true;
-  currentIndex = s.index;
-  const row = $(`srow-${s.index}`);
-  if (row) row.classList.add("playing");
-  setSentenceState(s.index, "playing");
-  status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
-
-  s.audio.currentTime = 0;
-  s.audio.play().catch(() => {});
-  s.audio.onended = () => {
-    isPlaying = false;
-    currentIndex = null;
-    if (row) row.classList.remove("playing");
-    setSentenceState(s.index, null);
-    playCursor++;
-    // If the next sentence hasn't arrived, say so rather than falling silent
-    // with no explanation.
-    if (!sentences[playCursor - 1] && playCursor <= expectedChunks) {
-      status(`waiting for sentence ${playCursor}…`, "var(--amber)");
+function onPlayerState(state) {
+  setPlayButton(state);
+  updateTransport();
+  if (state === "waiting")   status("preparing your voice…", "var(--accent)");
+  if (state === "playing") {
+    status("playing", "var(--accent)");
+    if (firstSoundAt === null) {
+      firstSoundAt = (performance.now() - requestStart) / 1000;
+      renderTimings();
     }
-    tryPlayNext();
-  };
-}
-
-// One place that sets a sentence row's button and label:
-//   "playing" -> pause button, "PLAYING NOW" label
-//   "paused"  -> play button,  "PAUSED" label
-//   null      -> play button,  no label
-// (An explicit label, because a highlight alone is easy to miss while
-// you're listening rather than watching.)
-function setSentenceState(index, state) {
-  const btn = $(`sicon-${index}`);
-  if (btn) {
-    btn.innerHTML = state === "playing" ? ICON_PAUSE : ICON_PLAY;
-    btn.title = state === "playing" ? "Pause" : "Play";
   }
-  const src = $(`srow-${index}`)?.querySelector(".ssrc");
-  if (!src) return;
-  if (!src.dataset.orig) src.dataset.orig = src.textContent;
-  src.innerHTML = state
-    ? `<span class="nowplaying">▸ ${state === "playing" ? "PLAYING NOW" : "PAUSED"}</span> &nbsp;${escapeHtml(src.dataset.orig)}`
-    : escapeHtml(src.dataset.orig);
+  if (state === "buffering") status("buffering…", "var(--amber)");
+  if (state === "paused")    status("paused", "var(--amber)");
 }
 
-// Pause or resume the current sentence. isPlaying stays true throughout,
-// so tryPlayNext() won't start the next sentence while this one is paused
-// -- not even one that finishes generating during the pause.
-function togglePause() {
-  const s = currentIndex && sentences[currentIndex - 1];
-  if (!s) return;
-  if (s.audio.paused) {
-    s.audio.play().catch(() => {});
-    setSentenceState(s.index, "playing");
-    status(`playing ${s.index} of ${expectedChunks}`, "var(--accent)");
-  } else {
-    s.audio.pause();
-    setSentenceState(s.index, "paused");
-    status("paused", "var(--amber)");
-  }
+function onPlayerEnded() {
+  setPlayButton("ended");
+  setHighlight(-1);
+  $("tfill").style.width = "100%";
+  if (player) $("ttime").textContent = `${fmtTime(player.total)} / ${fmtTime(player.total)}`;
+  status(finishedIn ? `done in ${finishedIn}s` : "played", "var(--green)");
 }
 
+$("playBtn").addEventListener("click", () => {
+  if (!player) return;
+  ensureAudio();
+  if (player.state === "paused") player.resume();
+  else if (player.state === "ended") player.seek(0);
+  else player.pause();
+  updateTransport();
+});
+
+// Stop sound AND abandon any stream still arriving (frees the GPU too:
+// the server stops generating when the connection closes).
 function stopPlayback() {
-  sentences.forEach(s => { if (s) { s.audio.pause(); s.audio.onended = null; } });
-  document.querySelectorAll(".srow.playing").forEach(r => r.classList.remove("playing"));
-  // Reset the interrupted row's button and label too. (Before, a replay
-  // mid-sentence left a stale "PLAYING NOW" behind.)
-  if (currentIndex) setSentenceState(currentIndex, null);
-  isPlaying = false;
-  currentIndex = null;
+  if (abortStream) { abortStream(); abortStream = null; }
+  runId++;
+  if (player) { player.stop(); player = null; }
 }
 
 function renderTimings(total) {
   const parts = [
     ["heard", stageTimes.heard, "var(--lime)"],
     ["translated", stageTimes.translated, "var(--peach)"],
-    ["voice", Math.max(stageTimes.voice, 0.1).toFixed(1), "var(--accent)"],
-  ];
+    ["voice", stageTimes.voice != null ? Math.max(stageTimes.voice, 0.1).toFixed(1) : null, "var(--accent)"],
+  ].filter(([, secs]) => secs != null);
   $("timings").innerHTML = parts.map(([label, secs, color]) => `
     <div style="flex-grow:${Math.max(secs * 10, 6)};display:flex;flex-direction:column;gap:5px">
       <div style="height:3px;background:${color};border-radius:2px"></div>
       <span style="font-size:10.5px;color:var(--faint)">${label} ${secs}s</span>
-    </div>`).join("");
+    </div>`).join("") + (firstSoundAt !== null
+      // Measured here, when sound actually starts — includes upload,
+      // conversion and the playback buffer, which server timings can't see.
+      ? `<span style="font-size:10.5px;color:var(--faint);align-self:flex-end;margin-left:8px;white-space:nowrap">first sound after ${firstSoundAt.toFixed(1)}s</span>`
+      : "");
 }
 
 function escapeHtml(s) {
@@ -984,9 +1209,11 @@ function escapeHtml(s) {
 }
 
 function handleStageError(ev) {
+  if (player) player.stop();
   const kept = [];
   if (ev.transcript) kept.push(`heard: "${ev.transcript}"`);
   if (ev.translation) kept.push(ev.translation);
+  if (ev.stage === "speak" && translatedText) kept.push(translatedText);
 
   const titles = {
     transcribe: "We didn't hear anything",
@@ -1035,85 +1262,51 @@ function updateFilename() {
 $("againBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
 $("redoBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
 $("replayAllBtn").addEventListener("click", () => {
-  stopPlayback();
-  playCursor = 1;
-  tryPlayNext();
+  if (!player) return;
+  ensureAudio();
+  player.seek(0);
+  updateTransport();
 });
 
 // ─────────────────────────────────────────────────────────────
-// Saving — joins every sentence into one file
+// Saving
 // ─────────────────────────────────────────────────────────────
+// The server already wrote exactly what was streamed to history/, so Save
+// normally just fetches that file. If history saving failed, build a WAV
+// from the pieces the page already holds.
 
-// Each sentence comes back as its own WAV. To save one file we have to
-// stitch them: read each one's audio data out of its container, join the
-// data, and write a fresh header describing the combined length.
-async function joinWavs(blobs) {
-  const bufs = await Promise.all(blobs.map(b => b.arrayBuffer()));
-
-  const parts = bufs.map(buf => {
-    const view = new DataView(buf);
-    // Walk the RIFF chunks rather than assuming a 44-byte header — the
-    // header size varies and guessing produces a click at every join.
-    let pos = 12, fmt = null, data = null;
-    while (pos + 8 <= view.byteLength) {
-      const id = String.fromCharCode(view.getUint8(pos), view.getUint8(pos + 1),
-                                     view.getUint8(pos + 2), view.getUint8(pos + 3));
-      const size = view.getUint32(pos + 4, true);
-      if (id === "fmt ") fmt = { offset: pos + 8, size };
-      if (id === "data") { data = { offset: pos + 8, size }; break; }
-      pos += 8 + size + (size % 2);
-    }
-    return { buf, view, fmt, data };
-  });
-
-  const first = parts[0];
-  // Read the format tag rather than assuming 1 (integer PCM). The voice
-  // model writes 32-bit FLOAT wavs, tag 3 — declaring those as integer
-  // produces a file whose header contradicts its contents, which plays
-  // back as noise. This only shows up on real audio; synthetic 16-bit
-  // test files hide it.
-  const audioFormat = first.view.getUint16(first.fmt.offset, true);
-  const channels    = first.view.getUint16(first.fmt.offset + 2, true);
-  const sampleRate  = first.view.getUint32(first.fmt.offset + 4, true);
-  const bits        = first.view.getUint16(first.fmt.offset + 14, true);
-
-  const totalData = parts.reduce((n, p) => n + p.data.size, 0);
-  const out = new ArrayBuffer(44 + totalData);
-  const ov = new DataView(out);
-  const w = (o, s) => { for (let i = 0; i < s.length; i++) ov.setUint8(o + i, s.charCodeAt(i)); };
-
-  w(0, "RIFF"); ov.setUint32(4, 36 + totalData, true); w(8, "WAVEfmt ");
-  ov.setUint32(16, 16, true); ov.setUint16(20, audioFormat, true);
-  ov.setUint16(22, channels, true); ov.setUint32(24, sampleRate, true);
-  ov.setUint32(28, sampleRate * channels * bits / 8, true);
-  ov.setUint16(32, channels * bits / 8, true); ov.setUint16(34, bits, true);
-  w(36, "data"); ov.setUint32(40, totalData, true);
-
-  let offset = 44;
-  for (const p of parts) {
-    new Uint8Array(out).set(new Uint8Array(p.buf, p.data.offset, p.data.size), offset);
-    offset += p.data.size;
-  }
+// A 32-bit float WAV (format tag 3), the same format the server writes.
+function encodeWav(samples, sampleRate) {
+  const out = new ArrayBuffer(44 + samples.length * 4);
+  const v = new DataView(out);
+  const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + samples.length * 4, true); w(8, "WAVEfmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 3, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 4, true);
+  v.setUint16(32, 4, true); v.setUint16(34, 32, true);
+  w(36, "data"); v.setUint32(40, samples.length * 4, true);
+  new Float32Array(out, 44).set(samples);
   return new Blob([out], { type: "audio/wav" });
 }
 
-$("saveBtn").addEventListener("click", async () => {
-  const blobs = sentences.filter(Boolean).map(s => s.blob);
-  if (!blobs.length) return;
+function playerToWav(p) {
+  const n = p.pieces.reduce((a, b) => a + b.length, 0);
+  const all = new Float32Array(n);
+  let o = 0;
+  for (const b of p.pieces) { all.set(b.getChannelData(0), o); o += b.length; }
+  return encodeWav(all, p.pieces[0].sampleRate);
+}
 
-  // Prefer the file the server already wrote to history: it's joined with a
-  // crossfade at every seam, which the client-side joiner below doesn't do.
-  // The client join stays as a fallback for when history saving failed.
+$("saveBtn").addEventListener("click", async () => {
+  if (!player || !player.pieces.length) return;
   let combined = null;
   if (savedId) {
     try {
       const r = await fetch(`/api/history/${savedId}.wav`);
       if (r.ok) combined = await r.blob();
-    } catch { /* fall through to the client join */ }
+    } catch { /* fall through */ }
   }
-  if (!combined) {
-    combined = blobs.length === 1 ? blobs[0] : await joinWavs(blobs);
-  }
+  if (!combined) combined = playerToWav(player);
 
   if (window.showSaveFilePicker) {
     try {

@@ -4,7 +4,7 @@ Speak in English, hear it back in another language — **in your own voice**.
 
 A learning prototype. Everything except the translation runs locally on your own machine, and no model is ever trained on your voice.
 
-> **This is the `qwen-streaming` branch.** It swaps the voice model from Chatterbox to **Qwen3-TTS on Apple's MLX runtime**: first sound roughly twice as soon, each sentence about three times faster, at the cost of 13 of the 22 languages ([ADR-0010](docs/adr/0010-qwen3-tts-on-mlx-for-voice-cloning.md)). `main` still runs Chatterbox with all 22.
+> **This is the `qwen-streaming` branch.** It swaps the voice model from Chatterbox to **Qwen3-TTS on Apple's MLX runtime**: the whole message is voiced as **one stream** that starts playing within about half a second of generation starting ([ADR-0010](docs/adr/0010-qwen3-tts-on-mlx-for-voice-cloning.md), [ADR-0012](docs/adr/0012-stream-one-generation-per-message.md)). First sound arrives in about 5–6 seconds instead of 20, with no change of voice between sentences, at the cost of 13 of the 22 languages. `main` still runs Chatterbox with all 22.
 
 ![status](https://img.shields.io/badge/status-prototype-orange) ![python](https://img.shields.io/badge/python-3.12-blue) ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-lightgrey)
 
@@ -18,8 +18,8 @@ Three stages chained together:
 flowchart LR
     A[Your voice] --> B["Speech → text<br/>+ split into sentences<br/><i>faster-whisper</i><br/>local · ~1.4s"]
     B --> C["Translate<br/><i>Claude</i><br/>API · ~2.3s"]
-    C --> D["Text → your voice<br/><i>Qwen3-TTS (MLX)</i><br/>local · ~4s"]
-    D --> E[Cloned audio]
+    C --> D["Text → your voice<br/><i>Qwen3-TTS (MLX)</i><br/>local · streams, first sound ~0.6s"]
+    D --> E[Cloned audio,<br/>played as it arrives]
 ```
 
 **Nothing is trained.** Qwen3-TTS does *zero-shot* voice cloning: your reference recording is passed in as an input on every generation, the way you'd hand a reference image to an image model. The model weights never change and never learn anything about you.
@@ -75,33 +75,42 @@ Aim for 15–20 seconds of continuous, natural speech in a quiet room without ec
 
 Tap the microphone, speak, tap **Stop and translate**.
 
-You can say several sentences. They're split at sentence boundaries and
-played back one at a time, so you hear the first one while the rest are
-still being generated.
+You can say several sentences. Each is translated on its own and shown
+on its own row, but the voice is generated as **one stream for the whole
+message** and starts playing while the rest is still being made. The
+sentence being spoken is highlighted; tap any sentence to play from there.
 
 ---
 
 ## Performance
 
 Measured on an M3 MacBook Air, the same three-sentence Russian recording
-through each voice model:
+(a 17-second reference clip, 16.6 s of translated speech) through each
+version:
 
-| | First audio | All finished | Per sentence |
-|---|---|---|---|
-| Chatterbox (`main`) | 21.6s | 49.6s | ~12s |
-| **Qwen3-TTS on MLX** (this branch) | **9.9s** | **17.8s** | **~4s** |
+| | First sound | Voice fully generated |
+|---|---|---|
+| Chatterbox, one sentence at a time (`main`) | 21.6s | 49.6s |
+| Qwen3-TTS, one sentence at a time | 9.9s | 17.8s |
+| **Qwen3-TTS, one stream per message** (this branch) | **~6.0s** | **16.4s** |
 
-Of that 9.9s, 2.3s is speech-to-text and 3.6s is translation (all three
-sentences at once), so voice generation is no longer the biggest wait.
-Qwen3-TTS generates speech about 1.4x faster than it plays; Chatterbox ran
-at about 0.5x.
+Of that ~6 seconds, about 2.5 s is speech-to-text, 2 s is translation (all
+sentences at once), 0.8 s is the voice model's first audio, and 0.6 s is a
+safety buffer in the page. Speech to text and translation are now the
+biggest waits. Qwen3-TTS generates speech 1.1–1.4x faster than it plays;
+Chatterbox ran at about 0.5x.
+
+On a short three-sentence message, the page measured first sound at
+4.8–5.2 s.
 
 Russian word accuracy is roughly the same: transcribing the generated
 speech back with a multilingual Whisper, 6% of words weren't heard as
 intended with Qwen3-TTS, against 5% with Chatterbox.
 
 The figures below were measured on `main`, with Chatterbox. They explain
-why speech is split into sentences at all.
+why speech was split into sentences in the first place. Streaming made the
+split unnecessary for speed, and generating sentences separately made each
+one sound like a slightly different speaker (ADR-0012).
 
 | | First audio | All finished |
 |---|---|---|
@@ -120,9 +129,17 @@ sentence gains nothing at all, because the first sentence still takes its
 full ~12s to generate either way.
 
 Voice generation is never parallelised: one Chatterbox model on one GPU
-deadlocked when called from several threads, so sentences queue. Qwen3-TTS
-keeps the same queue; it hasn't been tested in parallel. Translations do run concurrently, since they're just
-network calls.
+deadlocked when called from several threads. There's one generation per
+message now, and a lock stops two requests (two tabs, say) from ever
+running the model at once. Translations do run concurrently, since they're
+just network calls.
+
+**Playback is gapless.** Audio arrives in ~0.3 s pieces, and the page
+schedules each one to start on the exact sample where the last one ends.
+Rendered offline, the output matched the source to within floating-point
+rounding. If generation ever falls behind playback (a long message on a
+busy fanless laptop), the page shows "buffering…" for half a second
+instead of stuttering.
 
 Recordings are capped at 30 seconds, and speech with no full stop is
 broken at the last comma so a rambling sentence can't stall the queue.
@@ -158,7 +175,8 @@ current translation to a folder you pick, for taking elsewhere.
 
 ## Limitations
 
-- **Not real-time.** Tap, speak, tap, wait. Sentences arrive one at a time rather than all at the end, but simultaneous interpretation is a substantially harder problem.
+- **Not real-time.** Tap, speak, tap, wait about five seconds. The voice streams once it starts, but translating *while* you speak, like a live interpreter, is a substantially harder problem.
+- **The highlight is approximate.** One audio stream has no sentence markers, so which sentence is lit is estimated from the length of its text. It's usually right, but can be off by a fraction of a second.
 - **Your accent is the model's, not yours.** Cross-lingual cloning transfers vocal timbre convincingly, but prosody comes from the model. It sounds recognisably like you speaking with a slight accent.
 - **English input only.** `small.en` is English-only; switch `WHISPER_MODEL` in `pipeline.py` to `large-v3-turbo` for multilingual input at roughly 8× the transcription cost.
 - **Nine languages, not 22.** See below.
@@ -191,7 +209,7 @@ LANGUAGES = {
 
 ```
 pipeline.py      The three stages. Loads models once, keeps them warm.
-server.py        FastAPI. Streams a JSON event per sentence as each finishes.
+server.py        FastAPI. Streams progress events, then the voice as ~0.3s audio pieces.
 index.html       The interface — one file, no build step.
 history/         Saved clips (gitignored — your voice, your transcripts).
 check_key.py     Verifies your API key without printing it.
@@ -204,7 +222,7 @@ bench.py         Chatterbox only — run with main's .venv.
 canvas.json      Layout for those design artboards.
 ```
 
-Progress in the UI is **real**, not a timer: the server emits an event as each stage and each sentence completes, and the page plays audio as it arrives.
+Progress in the UI is **real**, not a timer: the server emits an event as each stage completes, then streams the voice in pieces, and the page plays them as they arrive.
 
 ---
 
@@ -223,6 +241,10 @@ All fixed here, but they're the kind that recur:
 **Not every WAV is integer PCM.** The voice model writes 32-bit *float* WAVs (format tag 3). Python's `wave` module refuses those outright ("unknown format: 3"), and a joiner that hardcodes tag 1 in its output header produces a file whose header contradicts its contents — which plays as noise. Both joiners now read the tag from the source. Synthetic 16-bit test files hide this completely.
 
 **A library can hide its own missing parts.** The watermark library imports six packages it never declares, and when one is missing it reports `'NoneType' object is not callable` instead of the real error. It happened twice, a month apart: first `pkg_resources`, then `librosa`. Every one is now pinned by hand in `requirements.txt`, and the watermark is checked with its own detector rather than trusted because nothing crashed.
+
+**Watermarking in pieces clicks.** The watermark treats the start and end of whatever it's given slightly differently, so marking each 0.3-second streaming piece on its own made every join a tiny step: a faint tick three times a second. Each piece is now marked together with the audio just before it, and passes are crossfaded over 20 ms. The joins then measure identically to watermarking the whole clip at once.
+
+**Hidden tabs don't animate.** Browsers slow or pause `requestAnimationFrame` for tabs that aren't visible, so a highlight driven only by animation frames lagged behind taps. The transport now redraws the moment you act, and uses frames only for smooth motion.
 
 **Sentence boundaries don't come from silence.** Neither VAD pauses nor Whisper's own segment timestamps line up with sentences — both split mid-sentence. The transcript's punctuation is the only reliable boundary, so text is buffered until it ends in `.`, `?` or `!`.
 

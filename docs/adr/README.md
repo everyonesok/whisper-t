@@ -48,6 +48,7 @@ whole mechanism.
 | [0006](0006-tap-to-toggle-over-hold-to-talk.md) | Tap to toggle over hold to talk | Accepted |
 | [0007](0007-server-side-clip-history.md) | Server-side clip history | Accepted |
 | [0008](0008-pin-setuptools-below-81.md) | Pin setuptools below 81 | Accepted |
-| [0009](0009-crossfade-sentence-chunks.md) | Crossfade sentence chunks when joining | Accepted |
+| [0009](0009-crossfade-sentence-chunks.md) | Crossfade sentence chunks when joining | Superseded by 0012 |
 | [0010](0010-qwen3-tts-on-mlx-for-voice-cloning.md) | Qwen3-TTS on MLX for voice cloning | Accepted |
 | [0011](0011-gradient-visual-language-and-system-type.md) | Gradient visual language and system type | Accepted |
+| [0012](0012-stream-one-generation-per-message.md) | Stream one generation per message | Accepted |

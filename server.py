@@ -19,12 +19,15 @@ import json
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 import torch
 import torchaudio as ta
 from fastapi import FastAPI, UploadFile, Form, HTTPException
@@ -37,6 +40,12 @@ HERE = Path(__file__).parent
 # One translator for the whole server. Loading costs 10-20 seconds, so it
 # happens once at startup rather than per request.
 translator: VoiceTranslator | None = None
+
+# One voice model on one GPU must never run twice at once -- parallel
+# generation deadlocked outright (ADR-0005). Within a request that's
+# guaranteed by generating one stream; this lock covers two requests
+# arriving together (two tabs, a double submit).
+VOICE_LOCK = threading.Lock()
 
 
 @asynccontextmanager
@@ -265,48 +274,63 @@ async def translate(audio: UploadFile, language: str = Form("ru")):
                        transcript=" ".join(sentences))
             return
 
+        # Per-sentence pairs let the page show one row per sentence even
+        # though the audio is a single stream.
         yield emit(stage="translate", status="done",
                    seconds=round(time.time() - t0, 1),
-                   text=" ".join(translations))
+                   text=" ".join(translations),
+                   sentences=[{"source": src, "text": tr}
+                              for src, tr in zip(sentences, translations)])
 
-        # ---- Stage 3: speak each sentence, in order ----
-        # Emitting in order matters: the page plays chunks as they arrive,
-        # so out-of-order delivery would scramble the sentences.
-        yield emit(stage="speak", status="start", chunks=len(sentences))
+        # ---- Stage 3: speak the whole message as ONE stream ----
+        # Sentences were only split so each could be translated and shown on
+        # its own row. The voice is generated in a single pass: separate
+        # generations sounded like different speakers at every join
+        # (ADR-0012). Streaming means the first sound still arrives in about
+        # half a second, so the split no longer buys any speed.
+        #
+        # Each "audio" event is ~0.3s of raw 32-bit float PCM, little-endian,
+        # base64-encoded, already watermarked. The page queues them for
+        # gapless playback; nothing here waits for the whole clip.
+        yield emit(stage="speak", status="start")
+        t0 = time.time()
+        pieces = []                       # kept so the clip can be saved to history
+        sample_rate = None
+        first_audio = None
+        try:
+            with VOICE_LOCK:
+                for seq, (samples, sample_rate) in enumerate(
+                        translator.speak_stream(" ".join(translations), language)):
+                    if first_audio is None:
+                        first_audio = round(time.time() - t0, 2)
+                    pieces.append(samples)
+                    yield emit(stage="audio", seq=seq, sample_rate=sample_rate,
+                               samples=len(samples),
+                               pcm=base64.b64encode(
+                                   samples.astype("<f4").tobytes()).decode())
+        except Exception as e:
+            # The translation is still worth showing even if the voice failed.
+            yield emit(stage="speak", status="error", message=str(e))
+            return
 
-        generated_paths = []          # kept so the clip can be saved to history
-
-        for i, (source, translated) in enumerate(zip(sentences, translations), 1):
-            t0 = time.time()
-            try:
-                out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                out.close()
-                translator.speak(translated, language, out.name)
-                wav_bytes = Path(out.name).read_bytes()
-                generated_paths.append(out.name)
-            except Exception as e:
-                # One sentence failing shouldn't lose the others. Report it
-                # and carry on -- the page can play what did work and show
-                # the text for what didn't.
-                yield emit(stage="chunk", index=i, total=len(sentences),
-                           status="error", message=str(e),
-                           source=source, text=translated)
-                continue
-
-            yield emit(stage="chunk", index=i, total=len(sentences),
-                       status="done",
-                       seconds=round(time.time() - t0, 1),
-                       source=source, text=translated,
-                       audio=base64.b64encode(wav_bytes).decode())
+        duration = sum(len(p) for p in pieces) / sample_rate if pieces else 0
+        yield emit(stage="speak", status="done",
+                   seconds=round(time.time() - t0, 1),
+                   first_audio=first_audio,
+                   duration=round(duration, 1))
 
         total = round(time.time() - overall, 1)
 
-        # Saving is best-effort: a full disk or a permissions problem
-        # shouldn't lose a translation the user has already heard.
+        # Save exactly what was streamed. Best-effort: a full disk or a
+        # permissions problem shouldn't lose a translation already heard.
         saved = None
         try:
-            saved = save_to_history(language, sentences, translations,
-                                    generated_paths, total)
+            if pieces:
+                wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                wav.close()
+                sf.write(wav.name, np.concatenate(pieces), sample_rate, subtype="FLOAT")
+                saved = save_to_history(language, sentences, translations,
+                                        [wav.name], total)
         except Exception as e:
             print(f"  could not save to history: {e}")
 
