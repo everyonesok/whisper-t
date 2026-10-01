@@ -109,16 +109,17 @@
     background: rgba(255, 255, 255, 0.03);
   }
 
-  header, footer {
+  /* Thumb-zone layout (ADR-0018): the top bar holds what you READ (brand,
+     status) and the occasional History tap; what you TOUCH every turn --
+     the mic, the language, the action buttons -- lives in the bottom third. */
+  header {
     display: grid; grid-template-columns: 1fr 1fr; flex-shrink: 0;
-    font-size: 13px;
+    font-size: 13px; border-bottom: 1px solid var(--hair);
   }
-  header { border-bottom: 1px solid var(--hair); }
-  footer { border-top: 1px solid var(--hair); font-size: 11.5px; color: var(--faint); }
-  header > div, footer > div {
-    display: flex; align-items: center; gap: 9px; padding: 14px 20px;
+  header > div {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px; min-width: 0;
   }
-  header > div + div, footer > div + div {
+  header > div + div {
     border-left: 1px solid var(--hair); justify-content: flex-end;
   }
 
@@ -147,7 +148,19 @@
     padding: 30px; overflow-y: auto;
   }
   .screen.center { align-items: center; justify-content: center; }
-  .status { display: flex; align-items: center; gap: 8px; }
+  .status { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11.5px; color: var(--faint); }
+  /* Long statuses ("waiting for sentence 2…") trim rather than push the
+     History button out of a narrow phone header. */
+  .status span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Language pill: "English → Russian ▾". Still the native <select>, so
+     touch, keyboard and screen readers work as before. */
+  .langbar {
+    display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0;
+    background: #fff; border-radius: 999px; padding: 4px 4px 4px 18px;
+    font-size: 13px; color: oklch(0.50 0.008 95);
+  }
+  .langbar select { background-color: transparent; padding-left: 0; }
 
   /* ── Type ────────────────────────────────────────────────────── */
   .display { font-size: 40px; font-weight: 500; letter-spacing: -0.045em; line-height: 0.98; }
@@ -289,31 +302,20 @@
   <header>
     <div class="brand"><span class="dot"></span><span>echo</span></div>
     <div>
+      <div class="status"><span class="dot" id="statusDot" style="background:var(--green)"></span><span id="statusText">ready</span></div>
       <button id="histBtn" class="pill" title="Saved clips">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
         </svg>
         <span id="histCount"></span>
       </button>
-      <select id="lang"></select>
     </div>
   </header>
 
   <main>
 
     <!-- ============ IDLE ============ -->
-    <section class="screen center" id="s-idle" style="gap:30px">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:22px">
-        <div class="mic" id="micBtn">
-          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/>
-          </svg>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
-          <div class="display">Tap to speak</div>
-          <div style="font-size:14px;color:var(--muted)">Tap again when you're done</div>
-        </div>
-      </div>
+    <section class="screen" id="s-idle" style="align-items:center;gap:22px;padding:24px 30px 20px">
       <div class="hint card">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0;margin-top:1px">
           <circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/>
@@ -323,10 +325,25 @@
           <div style="font-size:12.5px;line-height:1.5;color:var(--muted)">A short sentence takes about 5 seconds. Longer messages start playing while the rest is still being made.</div>
         </div>
       </div>
+      <div style="flex-grow:1"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+        <div class="display">Tap to speak</div>
+        <div style="font-size:14px;color:var(--muted)">Tap again when you're done</div>
+      </div>
+      <div class="mic" id="micBtn">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/>
+        </svg>
+      </div>
+      <label class="langbar" for="lang">
+        <span>English</span><span aria-hidden="true">→</span>
+        <select id="lang" aria-label="Translate into"></select>
+      </label>
     </section>
 
     <!-- ============ RECORDING ============ -->
-    <section class="screen center" id="s-rec" hidden style="gap:32px;cursor:pointer">
+    <section class="screen" id="s-rec" hidden style="align-items:center;gap:32px;padding-bottom:20px;cursor:pointer">
+      <div style="flex-grow:1"></div>
       <div style="display:flex;align-items:center;gap:9px">
         <span class="rec-dot" style="width:9px;height:9px;border-radius:50%;background:var(--red)"></span>
         <span class="label" style="color:#fff;font-size:12px">Recording</span>
@@ -347,11 +364,13 @@
           <span class="label">Very long</span>
         </div>
       </div>
-      <div style="display:flex;gap:10px">
+      <div style="flex-grow:1"></div>
+      <div style="display:flex;gap:10px;width:100%;max-width:392px">
         <!-- Cancel throws the recording away. It sits beside Stop so the
-             choice is explicit: keep what you said, or discard it. -->
-        <button class="btn btn-ghost" id="cancelBtn" style="flex-grow:0;padding:15px 22px">Cancel</button>
-        <button class="btn btn-primary" id="stopBtn" style="flex-grow:0;padding:15px 26px">
+             choice is explicit: keep what you said, or discard it. Equal
+             halves at the bottom: either is an easy press for one thumb. -->
+        <button class="btn btn-ghost" id="cancelBtn" style="flex:1;padding:15px 18px">Cancel</button>
+        <button class="btn btn-primary" id="stopBtn" style="flex:1;padding:15px 18px">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--red)"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>
           Stop and translate
         </button>
@@ -478,10 +497,6 @@
 
   </main>
 
-  <footer>
-    <div class="status"><span class="dot" id="statusDot" style="background:var(--green)"></span><span id="statusText">ready</span></div>
-    <div><span id="statusRight">en → ru</span></div>
-  </footer>
 </div>
 
 <script>
@@ -510,13 +525,7 @@ fetch("/api/languages").then(r => r.json()).then(langs => {
   $("lang").innerHTML = Object.entries(langs)
     .map(([code, name]) => `<option value="${code}">${name}</option>`).join("");
   $("lang").value = "ru";
-  updateTarget();
 });
-$("lang").addEventListener("change", updateTarget);
-function updateTarget() {
-  const code = $("lang").value;
-  $("statusRight").textContent = `en → ${code}`;
-}
 
 // ─────────────────────────────────────────────────────────────
 // Level meter bars

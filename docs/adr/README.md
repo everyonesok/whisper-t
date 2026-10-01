@@ -57,3 +57,4 @@ whole mechanism.
 | [0015](0015-one-voice-per-device.md) | One voice per device, locked to it | Accepted (mobile) |
 | [0016](0016-verify-the-speaker-on-every-translation.md) | Verify the speaker on every translation | Proposed |
 | [0017](0017-own-visual-direction-drop-frame-dots.md) | An own visual direction, starting by dropping the frame dots | Accepted |
+| [0018](0018-thumb-zone-layout.md) | Thumb-zone layout | Accepted |
