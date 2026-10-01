@@ -254,6 +254,8 @@ All fixed here, but they're the kind that recur:
 
 **Only clone your own voice, or one you have explicit permission to use.**
 
+**echo only speaks what was just said.** There is no way to type text and hear it in the cloned voice. The voice only ever speaks a translation of a live recording, which is the main reason echo can't easily be used as a general-purpose deepfake tool ([ADR-0013](docs/adr/0013-speech-in-speech-out-no-text-to-voice.md)). A mobile app would add live voice enrolment with no importing, one voice per device and possibly a speaker check on every use ([ADR-0014](docs/adr/0014-live-voice-enrolment-no-imported-audio.md)–[0016](docs/adr/0016-verify-the-speaker-on-every-translation.md)). This prototype still accepts any reference recording, so the rule above is on you.
+
 Two things are worth knowing if you build on this:
 
 **Everything generated here is watermarked.** echo applies Resemble AI's [Perth](https://github.com/resemble-ai/perth) imperceptible watermark to every clip. Chatterbox did this internally; Qwen3-TTS doesn't, so echo does it itself, and it has been verified with Perth's own detector. Audio produced by this tool can be identified as synthetic. Don't remove it.
