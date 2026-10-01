@@ -1,6 +1,6 @@
 # ADR-0011: Gradient visual language and system type
 
-**Status:** Accepted
+**Status:** Accepted — partly superseded by ADR-0017 (frame dots removed; now a starting point, not a fixed spec)
 **Date:** 2026-09-25
 
 ## Context

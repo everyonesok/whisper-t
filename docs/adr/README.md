@@ -50,9 +50,10 @@ whole mechanism.
 | [0008](0008-pin-setuptools-below-81.md) | Pin setuptools below 81 | Accepted |
 | [0009](0009-crossfade-sentence-chunks.md) | Crossfade sentence chunks when joining | Superseded by 0012 |
 | [0010](0010-qwen3-tts-on-mlx-for-voice-cloning.md) | Qwen3-TTS on MLX for voice cloning | Accepted |
-| [0011](0011-gradient-visual-language-and-system-type.md) | Gradient visual language and system type | Accepted |
+| [0011](0011-gradient-visual-language-and-system-type.md) | Gradient visual language and system type | Partly superseded by 0017 |
 | [0012](0012-stream-one-generation-per-message.md) | Stream one generation per message | Accepted |
 | [0013](0013-speech-in-speech-out-no-text-to-voice.md) | Speech in, speech out — never text to voice | Accepted |
 | [0014](0014-live-voice-enrolment-no-imported-audio.md) | Live voice enrolment, no imported audio | Accepted (mobile) |
 | [0015](0015-one-voice-per-device.md) | One voice per device, locked to it | Accepted (mobile) |
 | [0016](0016-verify-the-speaker-on-every-translation.md) | Verify the speaker on every translation | Proposed |
+| [0017](0017-own-visual-direction-drop-frame-dots.md) | An own visual direction, starting by dropping the frame dots | Accepted |
