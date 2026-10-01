@@ -414,7 +414,7 @@
 
       <div style="display:flex;align-items:center;justify-content:space-between">
         <span class="label" id="resultCount">1 SENTENCE</span>
-        <button class="linkish" id="redoBtn">Not what you said?</button>
+        <button class="linkish" id="redoBtn">Misheard? Say it again</button>
       </div>
 
       <div class="card transport">
@@ -1260,7 +1260,24 @@ function updateFilename() {
 }
 
 $("againBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
-$("redoBtn").addEventListener("click", () => { stopPlayback(); show("s-idle"); status("ready"); });
+// "Misheard? Say it again" -- a retry, not a correction. Editing the text
+// is ruled out on purpose (ADR-0013: a one-word edit can flip the meaning),
+// so the fix for a mishearing is to say it again, in one tap:
+//   1. stop playback and abandon any stream still arriving (the server
+//      stops generating, so an unfinished clip is never saved)
+//   2. start recording at once -- this tap is the gesture the mic needs
+//   3. delete the misheard clip from history, in the background
+$("redoBtn").addEventListener("click", () => {
+  const misheard = savedId;
+  stopPlayback();
+  savedId = null;
+  toggleRecording();
+  if (misheard) {
+    fetch(`/api/history/${misheard}`, { method: "DELETE" })
+      .then(() => refreshHistoryCount())
+      .catch(() => {});      // best effort: worst case the clip stays in history
+  }
+});
 $("replayAllBtn").addEventListener("click", () => {
   if (!player) return;
   ensureAudio();
