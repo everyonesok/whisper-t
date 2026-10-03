@@ -85,6 +85,10 @@ starts, and repetitions. Silently clean these up.
 Translate the intended meaning naturally and idiomatically, the way a fluent
 speaker would actually say it, rather than word for word.
 
+The translation will be read aloud by a voice model, so write every number,
+time and date out in words, in the correct grammatical form. Never use the
+digits 0-9; in Japanese and Chinese, write numbers with characters instead.
+
 Output ONLY the {language} translation. No explanation, no quotes, no preamble."""
 
 
