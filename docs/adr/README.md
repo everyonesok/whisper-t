@@ -60,3 +60,4 @@ whole mechanism.
 | [0018](0018-thumb-zone-layout.md) | Thumb-zone layout | Accepted |
 | [0019](0019-translate-for-the-ear-numbers-as-words.md) | Translate for the ear: numbers as words | Accepted |
 | [0020](0020-translate-the-whole-message-in-one-call.md) | Translate the whole message in one call | Accepted |
+| [0021](0021-speak-only-the-owners-part-of-a-message.md) | Speak only the owner's part of a message | Proposed |
