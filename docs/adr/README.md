@@ -59,3 +59,4 @@ whole mechanism.
 | [0017](0017-own-visual-direction-drop-frame-dots.md) | An own visual direction, starting by dropping the frame dots | Accepted |
 | [0018](0018-thumb-zone-layout.md) | Thumb-zone layout | Accepted |
 | [0019](0019-translate-for-the-ear-numbers-as-words.md) | Translate for the ear: numbers as words | Accepted |
+| [0020](0020-translate-the-whole-message-in-one-call.md) | Translate the whole message in one call | Accepted |

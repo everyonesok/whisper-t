@@ -19,9 +19,11 @@ Run directly to test the whole thing on a file:
     .venv-mlx/bin/python pipeline.py reference.wav ru
 """
 
+import json
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import anthropic
@@ -90,6 +92,37 @@ time and date out in words, in the correct grammatical form. Never use the
 digits 0-9; in Japanese and Chinese, write numbers with characters instead.
 
 Output ONLY the {language} translation. No explanation, no quotes, no preamble."""
+
+# Messages of two or more sentences are translated in ONE call, so the
+# translator sees the whole message (ADR-0020). Translated one sentence at a
+# time, "It's been way too long" became «Сколько лет, сколько зим!» in the
+# middle of an invitation, where a Russian speaker would open with it.
+WHOLE_MESSAGE_EXTRA = """
+The message arrives as numbered sentences. Translate it as one piece, the way a
+fluent speaker would say the whole thing. You may reorder or merge sentences
+where that is more natural in {language}; for example, a greeting or an
+exclamation like "long time no see" usually comes first.
+
+Return rows in the order they should be spoken. Each row gives the numbers of
+the input sentences it translates. Every input number must appear in exactly
+one row."""
+
+# The shape Claude must answer in: rows in spoken order, each saying which
+# English sentences it covers, so the page can still pair them up.
+ROWS_SCHEMA = {
+    "type": "object",
+    "properties": {"rows": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "sources": {"type": "array", "items": {"type": "integer"}},
+            "text": {"type": "string"},
+        },
+        "required": ["sources", "text"],
+        "additionalProperties": False,
+    }}},
+    "required": ["rows"],
+    "additionalProperties": False,
+}
 
 
 # ── Chunking speech into translatable pieces ──────────────────────────
@@ -471,6 +504,66 @@ class VoiceTranslator:
         if not blocks:
             raise RuntimeError(f"No text in response: {[b.type for b in response.content]}")
         return blocks[0].text.strip()
+
+    def translate_message(self, sentences, lang_code):
+        """Stage 2 for a whole message: a list of sentences -> rows to speak.
+
+        Returns rows in the order they should be spoken, each as
+        {"source": English text, "text": translation}. A row's source can be
+        several sentences when the translator merged them, and the rows can
+        come back in a different order from the English (ADR-0020).
+        """
+        # One sentence: nothing to reorder, so keep the plain call, which is
+        # about a second faster than the structured one.
+        if len(sentences) == 1:
+            return [{"source": sentences[0],
+                     "text": self.translate(sentences[0], lang_code)}]
+
+        try:
+            rows = self._translate_whole(sentences, lang_code)
+        except Exception as e:
+            print(f"  whole-message translation failed, translating per sentence: {e}")
+            rows = None
+
+        # Safety check: every English sentence used exactly once. If not,
+        # something was dropped or doubled, so fall back to the old method
+        # rather than show (and speak) a translation with a hole in it.
+        if rows is not None:
+            used = sorted(n for row in rows for n in row["sources"])
+            if used != list(range(1, len(sentences) + 1)):
+                print(f"  whole-message rows failed the check {used}; translating per sentence")
+                rows = None
+
+        if rows is None:
+            # The previous method: one call per sentence, all at once.
+            with ThreadPoolExecutor(max_workers=min(len(sentences), 8)) as pool:
+                texts = list(pool.map(lambda s: self.translate(s, lang_code), sentences))
+            return [{"source": s, "text": t} for s, t in zip(sentences, texts)]
+
+        return [{"source": " ".join(sentences[n - 1] for n in sorted(row["sources"])),
+                 "text": row["text"].strip()}
+                for row in rows]
+
+    def _translate_whole(self, sentences, lang_code):
+        """One structured call for the whole message; returns Claude's rows."""
+        language = LANGUAGES[lang_code]
+        numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, start=1))
+        response = self.claude.messages.create(
+            model="claude-opus-5",
+            max_tokens=2000,
+            system=(TRANSLATION_SYSTEM + WHOLE_MESSAGE_EXTRA).format(language=language),
+            output_config={
+                "effort": "low",
+                # Structured output: the answer is guaranteed to be JSON in
+                # the ROWS_SCHEMA shape, so it can be read without guessing.
+                "format": {"type": "json_schema", "schema": ROWS_SCHEMA},
+            },
+            messages=[{"role": "user", "content": numbered}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"Translation refused: {response.stop_details}")
+        text = next(b.text for b in response.content if b.type == "text")
+        return json.loads(text)["rows"]
 
     def speak(self, text, lang_code, out_path="output.wav"):
         """Stage 3, whole clip: translated text -> audio file in the reference voice."""

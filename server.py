@@ -21,7 +21,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -265,26 +264,25 @@ async def translate(audio: UploadFile, language: str = Form("ru")):
                    text=" ".join(sentences),
                    chunks=len(sentences))
 
-        # ---- Stage 2: translate every sentence at once ----
-        # These are independent network calls, so running them in parallel
-        # costs nothing and gets all the text ready before the slow stage.
+        # ---- Stage 2: translate the whole message ----
+        # Two or more sentences go to the translator together, so it can
+        # reorder or merge them the way a fluent speaker would (ADR-0020).
+        # Rows come back in SPOKEN order, each with the English it covers.
         t0 = time.time()
         try:
-            with ThreadPoolExecutor(max_workers=min(len(sentences), 8)) as pool:
-                translations = list(pool.map(
-                    lambda s: translator.translate(s, language), sentences))
+            rows = translator.translate_message(sentences, language)
         except Exception as e:
             yield emit(stage="translate", status="error", message=str(e),
                        transcript=" ".join(sentences))
             return
+        translations = [row["text"] for row in rows]   # in spoken order
 
-        # Per-sentence pairs let the page show one row per sentence even
-        # though the audio is a single stream.
+        # The rows let the page show one row per spoken piece even though
+        # the audio is a single stream.
         yield emit(stage="translate", status="done",
                    seconds=round(time.time() - t0, 1),
                    text=" ".join(translations),
-                   sentences=[{"source": src, "text": tr}
-                              for src, tr in zip(sentences, translations)])
+                   sentences=rows)
 
         # ---- Stage 3: speak the whole message as ONE stream ----
         # Sentences were only split so each could be translated and shown on
