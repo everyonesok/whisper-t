@@ -61,3 +61,4 @@ whole mechanism.
 | [0019](0019-translate-for-the-ear-numbers-as-words.md) | Translate for the ear: numbers as words | Accepted |
 | [0020](0020-translate-the-whole-message-in-one-call.md) | Translate the whole message in one call | Accepted |
 | [0021](0021-speak-only-the-owners-part-of-a-message.md) | Speak only the owner's part of a message | Proposed |
+| [0022](0022-on-device-voice-is-feasible-on-iphone.md) | On-device voice is feasible on iPhone | Accepted (mobile) |
